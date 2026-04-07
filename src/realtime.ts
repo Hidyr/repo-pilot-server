@@ -54,3 +54,20 @@ export function broadcastBoard(projectId: string, msg: string) {
   if (set.size === 0) boardSubscribersByProject.delete(projectId)
 }
 
+/**
+ * Close and forget all board websocket subscribers for a project.
+ * Useful when deleting a project so clients don't remain subscribed to a non-existent board.
+ */
+export function closeBoardSubscribers(projectId: string) {
+  const set = boardSubscribersByProject.get(projectId)
+  if (!set || set.size === 0) return
+  for (const ws of set) {
+    try {
+      ws.close(1000, "Project deleted")
+    } catch {
+      /* ignore */
+    }
+  }
+  boardSubscribersByProject.delete(projectId)
+}
+

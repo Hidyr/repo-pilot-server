@@ -10,6 +10,9 @@ import { projects, schedules as schedulesTable } from "../db/schema"
 import { detectGitInfo, gitClone } from "../services/git.service"
 import { getScheduleForProject } from "../services/schedules.service"
 import { getSetting } from "../services/settings.service"
+import { purgeProjectQueueState } from "../services/queue.service"
+import { deregisterSchedule } from "../services/scheduler.service"
+import { closeBoardSubscribers } from "../realtime"
 
 export const projectsRouter = new Hono()
 
@@ -200,6 +203,9 @@ projectsRouter.delete("/:id", async (c) => {
   const id = c.req.param("id")
   const row = await db.select().from(projects).where(eq(projects.id, id)).get()
   if (!row) return apiError(c, "PROJECT_NOT_FOUND", "Project not found", 404)
+  closeBoardSubscribers(id)
+  await deregisterSchedule(id)
+  await purgeProjectQueueState(id)
   await db.delete(projects).where(eq(projects.id, id)).run()
   return c.json({ ok: true })
 })

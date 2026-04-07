@@ -222,6 +222,47 @@ export async function cancelActiveJob(jobId: string): Promise<void> {
   }, 0)
 }
 
+/**
+ * Stops queue work for a project (abort active jobs, cancel waiting) and deletes all queue_jobs rows.
+ * Call this before deleting a project; queue_jobs are not declared with ON DELETE CASCADE.
+ */
+export async function purgeProjectQueueState(projectId: string): Promise<void> {
+  const jobs = await db.select().from(queueJobs).where(eq(queueJobs.projectId, projectId)).all()
+  const actives = jobs.filter((j) => j.status === "active")
+  const waitings = jobs.filter((j) => j.status === "waiting")
+
+  for (const j of actives) {
+    try {
+      await cancelActiveJob(j.id)
+    } catch {
+      const slot = activeSlots.get(j.id)
+      if (slot) {
+        try {
+          slot.controller.abort()
+        } catch {
+          /* ignore */
+        }
+        activeSlots.delete(j.id)
+      }
+      await db.delete(queueJobs).where(eq(queueJobs.id, j.id)).run()
+      setTimeout(() => {
+        processQueue().catch(() => {})
+      }, 0)
+    }
+  }
+
+  for (const j of waitings) {
+    try {
+      await cancelWaitingJob(j.id)
+    } catch {
+      await db.delete(queueJobs).where(eq(queueJobs.id, j.id)).run()
+    }
+  }
+
+  await db.delete(queueJobs).where(eq(queueJobs.projectId, projectId)).run()
+  scheduleBroadcast()
+}
+
 export async function initializeQueue(): Promise<void> {
   // Mark orphaned active jobs failed
   await db
