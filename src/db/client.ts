@@ -133,6 +133,20 @@ export async function runMigrations(): Promise<void> {
     );
   `)
 
+  // Best-effort uniqueness guarantees.
+  // Note: for existing DBs with duplicates, these CREATE INDEX statements can fail;
+  // we still enforce uniqueness at the API layer.
+  try {
+    sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_local_path_unique ON projects(local_path);`)
+  } catch {
+    /* ignore */
+  }
+  try {
+    sqlite.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_remote_url_unique ON projects(remote_url);`)
+  } catch {
+    /* ignore */
+  }
+
   // Lightweight "ALTER TABLE ADD COLUMN" migrations for dev upgrades.
   // Bun/SQLite doesn't support many ALTER operations; we only add missing columns.
   const hasColumn = (table: string, column: string): boolean => {

@@ -1,6 +1,6 @@
 import { Hono } from "hono"
 import { eq } from "drizzle-orm"
-import { existsSync } from "node:fs"
+import { existsSync, realpathSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
 import { basename, join } from "node:path"
@@ -15,6 +15,19 @@ import { deregisterSchedule } from "../services/scheduler.service"
 import { closeBoardSubscribers } from "../realtime"
 
 export const projectsRouter = new Hono()
+
+function normalizeLocalPath(p: string): string {
+  const trimmed = p.trim().replace(/\/+$/, "")
+  try {
+    return realpathSync(trimmed)
+  } catch {
+    return trimmed
+  }
+}
+
+function normalizeGitUrl(u: string): string {
+  return u.trim().replace(/\/+$/, "").replace(/\.git$/, "").toLowerCase()
+}
 
 function stats(projectId: string) {
   const pendingCount = (
@@ -72,6 +85,9 @@ projectsRouter.post("/", async (c) => {
     return apiError(c, "VALIDATION_ERROR", "type must be 'local' or 'git'", 400)
   }
 
+  // Enforce uniqueness (API-level; DB also has best-effort unique indexes).
+  const existingProjects = await db.select().from(projects).all()
+
   let localPath: string
   let name: string
   if (body.type === "local") {
@@ -79,11 +95,27 @@ projectsRouter.post("/", async (c) => {
     if (!existsSync(body.localPath)) {
       return apiError(c, "VALIDATION_ERROR", "localPath does not exist on disk", 400)
     }
-    localPath = body.localPath
+    localPath = normalizeLocalPath(body.localPath)
+    const already = existingProjects.some(
+      (p: any) => normalizeLocalPath(String(p.localPath ?? "")) === localPath
+    )
+    if (already) {
+      return apiError(c, "PROJECT_EXISTS", "A project with this local folder already exists.", 409)
+    }
     name = body.name ?? basename(localPath)
   } else {
     if (!body.gitUrl) {
       return apiError(c, "VALIDATION_ERROR", "gitUrl is required", 400)
+    }
+
+    const incomingGit = normalizeGitUrl(body.gitUrl)
+    const repoAlready = existingProjects.some((p: any) => {
+      const ru = String(p.remoteUrl ?? "")
+      if (!ru) return false
+      return normalizeGitUrl(ru) === incomingGit
+    })
+    if (repoAlready) {
+      return apiError(c, "REPO_EXISTS", "This Git repository was already added.", 409)
     }
 
     const repoName = basename(body.gitUrl.replace(/\/+$/, "").replace(/\.git$/, ""))
@@ -116,7 +148,13 @@ projectsRouter.post("/", async (c) => {
       return `${p}-${Date.now()}`
     }
 
-    localPath = ensureUniquePath(desired)
+    localPath = normalizeLocalPath(ensureUniquePath(desired))
+    const localAlready = existingProjects.some(
+      (p: any) => normalizeLocalPath(String(p.localPath ?? "")) === localPath
+    )
+    if (localAlready) {
+      return apiError(c, "PROJECT_EXISTS", "A project with this local folder already exists.", 409)
+    }
     name = body.name ?? repoName
 
     // Ensure parent directory exists (gitClone will create the leaf).
@@ -130,6 +168,19 @@ projectsRouter.post("/", async (c) => {
   }
 
   const gitInfo = await detectGitInfo(localPath)
+  if (gitInfo.isGitRepo) {
+    const detected = normalizeGitUrl(gitInfo.remoteUrl ?? "")
+    if (detected) {
+      const already = existingProjects.some((p: any) => {
+        const ru = String(p.remoteUrl ?? "")
+        if (!ru) return false
+        return normalizeGitUrl(ru) === detected
+      })
+      if (already) {
+        return apiError(c, "REPO_EXISTS", "This Git repository was already added.", 409)
+      }
+    }
+  }
   const createdAt = now()
   const row: any = {
     id: uuid(),
