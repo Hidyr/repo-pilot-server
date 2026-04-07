@@ -24,7 +24,12 @@ featuresRouter.get("/", async (c) => {
 })
 
 featuresRouter.post("/", async (c) => {
-  const body = (await c.req.json()) as { projectId?: string; title?: string; description?: string }
+  const body = (await c.req.json()) as {
+    projectId?: string
+    title?: string
+    description?: string
+    userPrompt?: string
+  }
   if (!body.projectId || !body.title) {
     return apiError(c, "VALIDATION_ERROR", "projectId and title are required", 400)
   }
@@ -37,7 +42,7 @@ featuresRouter.post("/", async (c) => {
     projectId: body.projectId,
     title: body.title,
     description: body.description ?? null,
-    userPrompt: null,
+    userPrompt: typeof body.userPrompt === "string" ? body.userPrompt : null,
     status: "pending",
     sortOrder,
     createdAt: now(),
