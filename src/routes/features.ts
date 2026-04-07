@@ -3,7 +3,7 @@ import { and, asc, eq, inArray } from "drizzle-orm"
 import { apiError } from "../http"
 import { db, now, uuid } from "../db/client"
 import { features, queueJobs, runs } from "../db/schema"
-import { enqueueJob, processQueue } from "../services/queue.service"
+import { enqueueJob, processQueue, purgeFeatureQueueState } from "../services/queue.service"
 import { boardSnapshot } from "../services/boardSnapshot.service"
 import { queueSnapshot } from "../services/queueSnapshot.service"
 import { broadcastBoard, broadcastQueue } from "../realtime"
@@ -182,21 +182,11 @@ featuresRouter.delete("/:id", async (c) => {
   const row = await db.select().from(features).where(eq(features.id, id)).get()
   if (!row) return apiError(c, "FEATURE_NOT_FOUND", "Feature not found", 404)
 
-  const status = String((row as any).status ?? "")
-  if (status === "queued" || status === "in_progress") {
-    const active = await db
-      .select()
-      .from(queueJobs)
-      .where(and(eq(queueJobs.featureId, id), eq(queueJobs.status, "active")))
-      .limit(1)
-      .all()
-    if (active.length > 0) return apiError(c, "JOB_ACTIVE", "Cannot delete while active", 409)
-    await db.delete(queueJobs).where(eq(queueJobs.featureId, id)).run()
-  }
-
+  const projectId = String((row as any).projectId)
+  await purgeFeatureQueueState(id, projectId)
+  await db.delete(runs).where(eq(runs.featureId, id)).run()
   await db.delete(features).where(eq(features.id, id)).run()
 
-  const projectId = String((row as any).projectId)
   const board = await boardSnapshot(projectId)
   broadcastBoard(projectId, JSON.stringify({ type: "board", projectId, data: board }))
   const q = await queueSnapshot()

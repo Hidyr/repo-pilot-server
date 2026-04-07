@@ -263,6 +263,41 @@ export async function purgeProjectQueueState(projectId: string): Promise<void> {
   scheduleBroadcast()
 }
 
+/**
+ * Remove all queue state for a single feature (abort if active), then delete its queue rows.
+ */
+export async function purgeFeatureQueueState(featureId: string, projectId: string): Promise<void> {
+  const jobs = await db.select().from(queueJobs).where(eq(queueJobs.featureId, featureId)).all()
+  const actives = jobs.filter((j) => j.status === "active")
+
+  for (const j of actives) {
+    try {
+      await cancelActiveJob(j.id)
+    } catch {
+      const slot = activeSlots.get(j.id)
+      if (slot) {
+        try {
+          slot.controller.abort()
+        } catch {
+          /* ignore */
+        }
+        activeSlots.delete(j.id)
+      }
+      await db.delete(queueJobs).where(eq(queueJobs.id, j.id)).run()
+      setTimeout(() => {
+        processQueue().catch(() => {})
+      }, 0)
+    }
+  }
+
+  await db.delete(queueJobs).where(eq(queueJobs.featureId, featureId)).run()
+  scheduleBroadcast()
+  scheduleBoardBroadcast(projectId)
+  setTimeout(() => {
+    processQueue().catch(() => {})
+  }, 0)
+}
+
 export async function initializeQueue(): Promise<void> {
   // Mark orphaned active jobs failed
   await db
