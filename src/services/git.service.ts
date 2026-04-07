@@ -1,6 +1,86 @@
+import { existsSync, readFileSync, statSync } from "node:fs"
+import { join, normalize } from "node:path"
 import simpleGit, { type SimpleGit } from "simple-git"
 
 const git = (localPath: string): SimpleGit => simpleGit(localPath)
+
+/**
+ * Resolve the git directory for a work tree (handles `.git` dir, `.git` file + worktrees).
+ */
+function resolveGitDir(workTreeRoot: string): string | null {
+  const dotGit = join(workTreeRoot, ".git")
+  if (!existsSync(dotGit)) return null
+  try {
+    const st = statSync(dotGit)
+    if (st.isDirectory()) return dotGit
+    if (st.isFile()) {
+      const line = (readFileSync(dotGit, "utf8").split(/\r?\n/)[0] ?? "").trim()
+      const m = /^gitdir:\s*(.+)$/i.exec(line)
+      if (!m) return null
+      const p = m[1]!.trim()
+      return normalize(p.startsWith("/") ? p : join(workTreeRoot, p))
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+/** Git config for remotes usually lives in the common git dir (main repo), not always in a linked worktree. */
+function configDirForGitDir(gitDir: string): string {
+  const commondirFile = join(gitDir, "commondir")
+  if (!existsSync(commondirFile)) return gitDir
+  try {
+    const rel = readFileSync(commondirFile, "utf8").trim()
+    if (!rel) return gitDir
+    return normalize(join(gitDir, rel))
+  } catch {
+    return gitDir
+  }
+}
+
+function readOriginFromConfigFile(configPath: string): { remoteUrl?: string; remoteName?: string } {
+  try {
+    if (!existsSync(configPath)) return {}
+    const text = readFileSync(configPath, "utf8")
+    const originBlock = text.match(/\[remote "origin"\][\s\S]*?(?=\n\[|\n*$)/i)
+    if (originBlock) {
+      const urlM = /^\s*url\s*=\s*(.+)\s*$/m.exec(originBlock[0])
+      if (urlM) {
+        let u = urlM[1]!.trim()
+        if ((u.startsWith('"') && u.endsWith('"')) || (u.startsWith("'") && u.endsWith("'"))) {
+          u = u.slice(1, -1)
+        }
+        return { remoteUrl: u, remoteName: "origin" }
+      }
+    }
+    const anyRemote = text.match(/\[remote "([^"]+)"\][\s\S]*?^\s*url\s*=\s*(.+)\s*$/m)
+    if (anyRemote) {
+      let u = anyRemote[2]!.trim()
+      if ((u.startsWith('"') && u.endsWith('"')) || (u.startsWith("'") && u.endsWith("'"))) {
+        u = u.slice(1, -1)
+      }
+      return { remoteUrl: u, remoteName: anyRemote[1] }
+    }
+  } catch {
+    /* ignore */
+  }
+  return {}
+}
+
+function readBranchFromGitDir(gitDir: string): string | undefined {
+  try {
+    const headPath = join(gitDir, "HEAD")
+    if (!existsSync(headPath)) return undefined
+    const raw = readFileSync(headPath, "utf8").trim()
+    const refM = /^ref: refs\/heads\/(.+)$/.exec(raw)
+    if (refM) return refM[1]!
+    if (/^[0-9a-f]{7,40}$/i.test(raw)) return raw
+  } catch {
+    /* ignore */
+  }
+  return undefined
+}
 
 export async function gitPull(localPath: string): Promise<void> {
   await git(localPath).pull()
@@ -50,13 +130,35 @@ export async function detectGitInfo(localPath: string): Promise<{
   branch?: string
   defaultBranch?: string
 }> {
+  const gitDir = resolveGitDir(localPath)
+  if (!gitDir) return { isGitRepo: false }
+
+  const configDir = configDirForGitDir(gitDir)
+  const configPath = join(configDir, "config")
+  const fsFallback = () => {
+    const { remoteUrl, remoteName } = readOriginFromConfigFile(configPath)
+    const branch = readBranchFromGitDir(gitDir)
+    return {
+      isGitRepo: true as const,
+      remoteUrl,
+      remoteName,
+      branch,
+      defaultBranch: branch,
+    }
+  }
+
   try {
     const g = git(localPath)
     const isRepo = await g.checkIsRepo()
-    if (!isRepo) return { isGitRepo: false }
+    if (!isRepo) {
+      return fsFallback()
+    }
     const remotes = await g.getRemotes(true)
     const origin = remotes.find((r) => r.name === "origin") ?? remotes[0]
-    const branch = (await g.revparse(["--abbrev-ref", "HEAD"])).trim()
+    let branch = (await g.revparse(["--abbrev-ref", "HEAD"])).trim()
+    if (branch === "HEAD") {
+      branch = readBranchFromGitDir(gitDir) ?? branch
+    }
     const defaultBranch = branch
     return {
       isGitRepo: true,
@@ -65,8 +167,12 @@ export async function detectGitInfo(localPath: string): Promise<{
       branch,
       defaultBranch,
     }
-  } catch {
-    return { isGitRepo: false }
+  } catch (e) {
+    console.warn(
+      "[detectGitInfo] git CLI/simple-git failed; using .git metadata fallback:",
+      (e as Error)?.message ?? e
+    )
+    return fsFallback()
   }
 }
 
