@@ -1,12 +1,15 @@
 import { Hono } from "hono"
 import { eq } from "drizzle-orm"
 import { existsSync } from "node:fs"
+import { mkdir } from "node:fs/promises"
+import { dirname } from "node:path"
 import { basename, join } from "node:path"
 import { apiError } from "../http"
 import { db, now, uuid, sqlite } from "../db/client"
 import { projects, schedules as schedulesTable } from "../db/schema"
 import { detectGitInfo, gitClone } from "../services/git.service"
 import { getScheduleForProject } from "../services/schedules.service"
+import { getSetting } from "../services/settings.service"
 
 export const projectsRouter = new Hono()
 
@@ -76,11 +79,46 @@ projectsRouter.post("/", async (c) => {
     localPath = body.localPath
     name = body.name ?? basename(localPath)
   } else {
-    if (!body.gitUrl || !body.clonePath) {
-      return apiError(c, "VALIDATION_ERROR", "gitUrl and clonePath are required", 400)
+    if (!body.gitUrl) {
+      return apiError(c, "VALIDATION_ERROR", "gitUrl is required", 400)
     }
-    localPath = body.clonePath
-    name = body.name ?? basename(body.gitUrl.replace(/\/+$/, "").replace(/\.git$/, ""))
+
+    const repoName = basename(body.gitUrl.replace(/\/+$/, "").replace(/\.git$/, ""))
+    const home = process.env.HOME ?? process.env.USERPROFILE ?? ""
+    const configuredBase = ((await getSetting("git_clone_base_dir")) ?? "").trim()
+    const defaultBase = configuredBase || (home ? join(home, "projects") : "")
+    const desired =
+      body.clonePath && body.clonePath.trim()
+        ? body.clonePath.trim()
+        : defaultBase
+          ? join(defaultBase, repoName)
+          : ""
+
+    if (!desired) {
+      return apiError(
+        c,
+        "VALIDATION_ERROR",
+        "clonePath is required (server could not determine a default folder)",
+        400
+      )
+    }
+
+    // If target already exists, add suffix to avoid clobbering.
+    const ensureUniquePath = (p: string): string => {
+      if (!existsSync(p)) return p
+      for (let i = 2; i <= 50; i++) {
+        const candidate = `${p}-${i}`
+        if (!existsSync(candidate)) return candidate
+      }
+      return `${p}-${Date.now()}`
+    }
+
+    localPath = ensureUniquePath(desired)
+    name = body.name ?? repoName
+
+    // Ensure parent directory exists (gitClone will create the leaf).
+    await mkdir(dirname(localPath), { recursive: true }).catch(() => {})
+
     try {
       await gitClone(body.gitUrl, localPath)
     } catch (e) {

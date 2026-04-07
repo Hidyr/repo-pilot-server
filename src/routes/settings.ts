@@ -12,6 +12,7 @@ settingsRouter.get("/", async (c) => {
   const autostart = (await getSetting("autostart")) ?? "false"
   const max_concurrent_runs = (await getSetting("max_concurrent_runs")) ?? "4"
   const minimize_to_tray = (await getSetting("minimize_to_tray")) ?? "true"
+  const git_clone_base_dir = (await getSetting("git_clone_base_dir")) ?? ""
 
   return c.json({
     data: {
@@ -19,6 +20,7 @@ settingsRouter.get("/", async (c) => {
       autostart,
       max_concurrent_runs,
       minimize_to_tray,
+      git_clone_base_dir,
       max_concurrent_runs_editable: locked ? "false" : "true",
       max_concurrent_runs_lock_reason: locked
         ? "Max concurrent runs cannot be changed while a feature is in progress or a queue job is active. Wait for active runs to finish."
@@ -33,6 +35,7 @@ settingsRouter.put("/", async (c) => {
     autostart?: boolean
     max_concurrent_runs?: number
     minimize_to_tray?: boolean
+    git_clone_base_dir?: string
   }
 
   const wantsMax =
@@ -55,6 +58,11 @@ settingsRouter.put("/", async (c) => {
   if (typeof body.autostart === "boolean") await setSetting("autostart", body.autostart ? "true" : "false")
   if (typeof body.minimize_to_tray === "boolean")
     await setSetting("minimize_to_tray", body.minimize_to_tray ? "true" : "false")
+  if (typeof body.git_clone_base_dir === "string") {
+    // allow blank (means "use default ~/projects")
+    const v = body.git_clone_base_dir.trim()
+    await setSetting("git_clone_base_dir", v)
+  }
   if (wantsMax) {
     const next = Math.min(4, Math.max(1, Math.trunc(body.max_concurrent_runs!)))
     await setSetting("max_concurrent_runs", String(next))
@@ -65,6 +73,7 @@ settingsRouter.put("/", async (c) => {
     autostart: (await getSetting("autostart")) ?? "false",
     max_concurrent_runs: (await getSetting("max_concurrent_runs")) ?? "4",
     minimize_to_tray: (await getSetting("minimize_to_tray")) ?? "true",
+    git_clone_base_dir: (await getSetting("git_clone_base_dir")) ?? "",
   }
 
   if (wantsMax) {

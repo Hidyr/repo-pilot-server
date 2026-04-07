@@ -180,6 +180,9 @@ export async function seedDefaults(): Promise<void> {
     { key: "autostart", value: "false" },
     { key: "max_concurrent_runs", value: "4" },
     { key: "minimize_to_tray", value: "true" },
+    // Default base directory for git clones (used when the client omits clonePath).
+    // Empty = use ~/projects when possible.
+    { key: "git_clone_base_dir", value: "" },
   ]
 
   const insertSetting = sqlite.prepare(
