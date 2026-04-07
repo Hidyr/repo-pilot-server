@@ -123,6 +123,42 @@ export async function gitClone(remoteUrl: string, localPath: string): Promise<vo
   await simpleGit().clone(remoteUrl, localPath)
 }
 
+const MAX_REF_LEN = 200
+
+/** Reject obviously unsafe ref names (path traversal, option injection). */
+export function assertSafeGitRef(name: string): string {
+  const t = name.trim()
+  if (!t || t.length > MAX_REF_LEN) throw new Error("Invalid branch name")
+  if (/[\r\n\0]/.test(t) || t.includes("..")) throw new Error("Invalid branch name")
+  if (t.startsWith("-") || t.startsWith("@")) throw new Error("Invalid branch name")
+  return t
+}
+
+export async function gitCheckoutBranch(localPath: string, branch: string): Promise<void> {
+  const b = assertSafeGitRef(branch)
+  await git(localPath).checkout(b)
+}
+
+/** Local branches and current checkout (branch name, or short sha when detached). */
+export async function gitListLocalBranches(
+  localPath: string
+): Promise<{ current: string; branches: string[] }> {
+  const g = git(localPath)
+  const summary = await g.branchLocal()
+  const branches = [...summary.all].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+  let abbrev = (await g.revparse(["--abbrev-ref", "HEAD"])).trim()
+  let current = abbrev
+  if (current === "HEAD") {
+    current = (await g.revparse(["--short", "HEAD"])).trim()
+  }
+  const set = new Set(branches)
+  if (current && !set.has(current)) {
+    branches.push(current)
+    branches.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }))
+  }
+  return { current, branches }
+}
+
 export async function detectGitInfo(localPath: string): Promise<{
   isGitRepo: boolean
   remoteUrl?: string

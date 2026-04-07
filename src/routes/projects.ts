@@ -7,7 +7,12 @@ import { basename, join } from "node:path"
 import { apiError } from "../http"
 import { db, now, uuid, sqlite } from "../db/client"
 import { projects, schedules as schedulesTable } from "../db/schema"
-import { detectGitInfo, gitClone } from "../services/git.service"
+import {
+  detectGitInfo,
+  gitCheckoutBranch,
+  gitClone,
+  gitListLocalBranches,
+} from "../services/git.service"
 import { getScheduleForProject } from "../services/schedules.service"
 import { getSetting } from "../services/settings.service"
 import { purgeProjectQueueState } from "../services/queue.service"
@@ -209,6 +214,69 @@ projectsRouter.get("/:id", async (c) => {
   const row = await db.select().from(projects).where(eq(projects.id, id)).get()
   if (!row) return apiError(c, "PROJECT_NOT_FOUND", "Project not found", 404)
   return c.json({ data: { ...(row as any), ...stats(id) } })
+})
+
+projectsRouter.get("/:id/git/branches", async (c) => {
+  const id = c.req.param("id")
+  const row = await db.select().from(projects).where(eq(projects.id, id)).get()
+  if (!row) return apiError(c, "PROJECT_NOT_FOUND", "Project not found", 404)
+  const localPath = String((row as any).localPath ?? "")
+  if (!(row as any).isGitRepo) {
+    return apiError(c, "NOT_GIT_REPO", "Project is not a Git repository", 400)
+  }
+  try {
+    const { current, branches } = await gitListLocalBranches(localPath)
+    return c.json({ data: { current, branches } })
+  } catch (e) {
+    return apiError(
+      c,
+      "GIT_ERROR",
+      (e as Error)?.message ?? "Could not list branches",
+      500
+    )
+  }
+})
+
+projectsRouter.post("/:id/git/checkout", async (c) => {
+  const id = c.req.param("id")
+  const body = (await c.req.json()) as { branch?: string }
+  const branch = typeof body.branch === "string" ? body.branch : ""
+  if (!branch.trim()) {
+    return apiError(c, "VALIDATION_ERROR", "branch is required", 400)
+  }
+  const row = await db.select().from(projects).where(eq(projects.id, id)).get()
+  if (!row) return apiError(c, "PROJECT_NOT_FOUND", "Project not found", 404)
+  const localPath = String((row as any).localPath ?? "")
+  if (!(row as any).isGitRepo) {
+    return apiError(c, "NOT_GIT_REPO", "Project is not a Git repository", 400)
+  }
+  try {
+    await gitCheckoutBranch(localPath, branch)
+  } catch (e) {
+    return apiError(
+      c,
+      "GIT_CHECKOUT_FAILED",
+      (e as Error)?.message ?? "git checkout failed",
+      400
+    )
+  }
+  const gitInfo = await detectGitInfo(localPath)
+  const branchLabel =
+    gitInfo.branch && gitInfo.branch !== "HEAD"
+      ? gitInfo.branch
+      : gitInfo.defaultBranch ?? gitInfo.branch ?? null
+  await db
+    .update(projects)
+    .set({
+      defaultBranch: branchLabel,
+      remoteUrl: gitInfo.isGitRepo ? gitInfo.remoteUrl ?? null : null,
+      remoteName: gitInfo.isGitRepo ? gitInfo.remoteName ?? null : null,
+      updatedAt: now(),
+    } as any)
+    .where(eq(projects.id, id))
+    .run()
+  const updated = await db.select().from(projects).where(eq(projects.id, id)).get()
+  return c.json({ data: { ...(updated as any), ...stats(id) } })
 })
 
 projectsRouter.get("/:id/readme", async (c) => {
