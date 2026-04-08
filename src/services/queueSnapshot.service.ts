@@ -9,6 +9,7 @@ export type QueueSnapshot = {
     projectId: string
     projectName: string
     featureId: string
+    runId: string | null
     featureTitle: string
     status: "waiting" | "active"
     priority: number
@@ -31,6 +32,7 @@ export async function queueSnapshot(): Promise<QueueSnapshot> {
         q.project_id as projectId,
         p.name as projectName,
         q.feature_id as featureId,
+        q.run_id as runId,
         f.title as featureTitle,
         q.status as status,
         q.priority as priority,
@@ -50,6 +52,7 @@ export async function queueSnapshot(): Promise<QueueSnapshot> {
     projectId: String(r.projectId),
     projectName: String(r.projectName),
     featureId: String(r.featureId),
+    runId: r.runId ? String(r.runId) : null,
     featureTitle: String(r.featureTitle),
     status: r.status === "active" ? "active" : "waiting",
     priority: Number(r.priority ?? 0),
