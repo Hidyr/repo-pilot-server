@@ -58,12 +58,10 @@ export async function runAgentStreaming(
     onOutput?: (chunk: string) => void | Promise<void>
   }
 ): Promise<{ success: boolean; logs: string; error?: string }> {
-  console.log('Running agent with prompt:', prompt)
   const agent = opts?.agentId ? await getAgentById(opts.agentId) : await getEnabledAgent()
   if (!agent) throw new Error("AGENT_NOT_FOUND")
 
   const promptFile = join(tmpdir(), `repopilot-${Date.now()}-${uuid()}.txt`)
-  console.log(`Writing prompt to temporary file: ${promptFile}`)
   await Bun.write(promptFile, prompt)
 
   const { command, args } = buildAgentCommand(agent, promptFile, workingDir)

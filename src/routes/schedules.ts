@@ -5,6 +5,7 @@ import { db, now } from "../db/client"
 import { agents, projects, schedules } from "../db/schema"
 import { getScheduleForProject } from "../services/schedules.service"
 import { registerSchedule } from "../services/scheduler.service"
+import { purgeWaitingJobsForProject } from "../services/queue.service"
 
 export const schedulesRouter = new Hono()
 
@@ -63,6 +64,7 @@ schedulesRouter.put("/:projectId", async (c) => {
   }
 
   const existing = await getScheduleForProject(projectId)
+  const wasEnabled = Boolean((existing as any).enabled)
 
   let agentId: string | null = null
   if (body.agentId !== undefined) {
@@ -101,6 +103,10 @@ schedulesRouter.put("/:projectId", async (c) => {
 
   const updated = await db.select().from(schedules).where(eq(schedules.id, existing.id)).get()
   if (updated) await registerSchedule(updated as any)
+
+  if (wasEnabled && !Boolean(body.enabled)) {
+    await purgeWaitingJobsForProject(projectId)
+  }
 
   return c.json({ data: updated })
 })

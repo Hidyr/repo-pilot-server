@@ -86,7 +86,6 @@ export async function executeFeatureRun(
       schedule.agentId ??
       (await getEnabledAgent())?.id ??
       null
-    console.log(`Selected agent for run ${run.id}: ${selectedAgentId}`)
     if (!selectedAgentId) {
       throw new Error("AGENT_NOT_FOUND")
     }

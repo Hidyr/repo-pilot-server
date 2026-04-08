@@ -264,6 +264,37 @@ export async function purgeProjectQueueState(projectId: string): Promise<void> {
 }
 
 /**
+ * Remove only queued (waiting) jobs for a project.
+ * Keeps any active (running) job going.
+ */
+export async function purgeWaitingJobsForProject(projectId: string): Promise<void> {
+  const waitings = await db
+    .select()
+    .from(queueJobs)
+    .where(and(eq(queueJobs.projectId, projectId), eq(queueJobs.status, "waiting")))
+    .all()
+
+  for (const job of waitings) {
+    await db.update(features).set({ status: "pending" }).where(eq(features.id, job.featureId)).run()
+
+    if ((job as any).runId) {
+      await db
+        .update(runs)
+        .set({ status: "skipped", completedAt: now(), errorMessage: "Automation disabled" } as any)
+        .where(eq(runs.id, (job as any).runId))
+        .run()
+    }
+
+    await db.delete(queueJobs).where(eq(queueJobs.id, job.id)).run()
+  }
+
+  if (waitings.length > 0) {
+    scheduleBroadcast()
+    scheduleBoardBroadcast(projectId)
+  }
+}
+
+/**
  * Remove all queue state for a single feature (abort if active), then delete its queue rows.
  */
 export async function purgeFeatureQueueState(featureId: string, projectId: string): Promise<void> {
