@@ -76,6 +76,7 @@ export async function runMigrations(): Promise<void> {
     CREATE TABLE IF NOT EXISTS schedules (
       id TEXT PRIMARY KEY NOT NULL,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      agent_id TEXT,
       enabled INTEGER NOT NULL DEFAULT 0,
       interval_type TEXT NOT NULL DEFAULT 'fixed',
       runs_per_day INTEGER NOT NULL DEFAULT 1,
@@ -92,9 +93,11 @@ export async function runMigrations(): Promise<void> {
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY NOT NULL,
       name TEXT NOT NULL,
-      type TEXT NOT NULL,
-      command_path TEXT NOT NULL,
-      enabled INTEGER NOT NULL DEFAULT 1,
+      preset TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      last_test_ok INTEGER NOT NULL DEFAULT 0,
+      last_tested_at TEXT,
+      last_test_output TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -169,6 +172,7 @@ export async function runMigrations(): Promise<void> {
   if (!hasColumn("features", "created_at")) addColumn("features", "created_at TEXT NOT NULL DEFAULT ''")
   if (!hasColumn("features", "updated_at")) addColumn("features", "updated_at TEXT NOT NULL DEFAULT ''")
 
+  if (!hasColumn("schedules", "agent_id")) addColumn("schedules", "agent_id TEXT")
   if (!hasColumn("schedules", "git_auto_pull")) addColumn("schedules", "git_auto_pull INTEGER NOT NULL DEFAULT 1")
   if (!hasColumn("schedules", "git_auto_commit")) addColumn("schedules", "git_auto_commit INTEGER NOT NULL DEFAULT 1")
   if (!hasColumn("schedules", "git_auto_push")) addColumn("schedules", "git_auto_push INTEGER NOT NULL DEFAULT 0")
@@ -186,6 +190,67 @@ export async function runMigrations(): Promise<void> {
   if (!hasColumn("queue_jobs", "run_id")) addColumn("queue_jobs", "run_id TEXT")
   if (!hasColumn("queue_jobs", "started_at")) addColumn("queue_jobs", "started_at TEXT")
   if (!hasColumn("queue_jobs", "completed_at")) addColumn("queue_jobs", "completed_at TEXT")
+
+  if (!hasColumn("agents", "last_test_ok")) addColumn("agents", "last_test_ok INTEGER NOT NULL DEFAULT 0")
+  if (!hasColumn("agents", "last_tested_at")) addColumn("agents", "last_tested_at TEXT")
+  if (!hasColumn("agents", "last_test_output")) addColumn("agents", "last_test_output TEXT")
+
+  if (hasColumn("agents", "type")) {
+    sqlite.exec(`
+      CREATE TABLE agents_new (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        command TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_test_ok INTEGER NOT NULL DEFAULT 0,
+        last_tested_at TEXT,
+        last_test_output TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO agents_new (id, name, command, enabled, last_test_ok, last_tested_at, last_test_output, created_at, updated_at)
+      SELECT id, name, command_path, enabled, 0, NULL, NULL, created_at, updated_at FROM agents;
+      DROP TABLE agents;
+      ALTER TABLE agents_new RENAME TO agents;
+    `)
+  }
+
+  if (hasColumn("agents", "command_path") && !hasColumn("agents", "command")) {
+    sqlite.exec(`
+      CREATE TABLE agents_new (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        command TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_test_ok INTEGER NOT NULL DEFAULT 0,
+        last_tested_at TEXT,
+        last_test_output TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      INSERT INTO agents_new (id, name, command, enabled, last_test_ok, last_tested_at, last_test_output, created_at, updated_at)
+      SELECT id, name, command_path, enabled, 0, NULL, NULL, created_at, updated_at FROM agents;
+      DROP TABLE agents;
+      ALTER TABLE agents_new RENAME TO agents;
+    `)
+  }
+
+  if (hasColumn("agents", "command") && !hasColumn("agents", "preset")) {
+    sqlite.exec(`DROP TABLE IF EXISTS agents;`)
+    sqlite.exec(`
+      CREATE TABLE agents (
+        id TEXT PRIMARY KEY NOT NULL,
+        name TEXT NOT NULL,
+        preset TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        last_test_ok INTEGER NOT NULL DEFAULT 0,
+        last_tested_at TEXT,
+        last_test_output TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `)
+  }
 }
 
 export async function seedDefaults(): Promise<void> {
@@ -208,20 +273,23 @@ export async function seedDefaults(): Promise<void> {
     insertSetting.run(row.key, row.value)
   }
 
-  // Seed one enabled agent. We do a "seed-if-empty" (rather than fixed id)
-  // so users can add/remove agents freely without us forcing a specific primary key.
-  const agentsCount = sqlite
-    .prepare("SELECT COUNT(*) as c FROM agents WHERE enabled = 1")
-    .get() as { c: number }
-
-  if ((agentsCount?.c ?? 0) > 0) return
-
-  sqlite
-    .prepare(
-    `INSERT INTO agents (id, name, type, command_path, enabled, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 1, ?, ?)
-     ON CONFLICT(id) DO NOTHING;`
-    )
-    .run(uuid(), "Cursor CLI", "cursor", "cursor", now(), now())
+  const t = now()
+  const builtin: Array<[string, string, string]> = [
+    ["cursor", "Cursor", "cursor"],
+    ["claude_code", "Claude Code", "claude_code"],
+    ["codex", "Codex", "codex"],
+  ]
+  const upsert = sqlite.prepare(
+    `INSERT INTO agents (id, name, preset, enabled, created_at, updated_at)
+     VALUES (?, ?, ?, 0, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       name = excluded.name,
+       preset = excluded.preset,
+       updated_at = excluded.updated_at`
+  )
+  for (const [id, name, preset] of builtin) {
+    upsert.run(id, name, preset, t, t)
+  }
+  sqlite.exec(`DELETE FROM agents WHERE id NOT IN ('cursor', 'claude_code', 'codex');`)
 }
 

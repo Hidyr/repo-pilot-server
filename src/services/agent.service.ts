@@ -4,24 +4,35 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { db, uuid } from "../db/client"
 import { agents } from "../db/schema"
-import type { Agent } from "../types"
+import type { Agent, AgentPreset } from "../types"
+import { BUILTIN_AGENT_ORDER, isAgentPreset, presetSpawnConfig } from "./agent-presets"
 
 export async function getEnabledAgent(): Promise<Agent | null> {
-  const row = await db.select().from(agents).where(eq(agents.enabled, true)).limit(1).get()
+  const rows = await db.select().from(agents).where(eq(agents.enabled, true)).all()
+  if (rows.length === 0) return null
+  const rank = new Map(BUILTIN_AGENT_ORDER.map((p, i) => [p, i]))
+  rows.sort(
+    (a, b) =>
+      (rank.get(a.preset as AgentPreset) ?? 99) - (rank.get(b.preset as AgentPreset) ?? 99)
+  )
+  return (rows[0] as Agent) ?? null
+}
+
+export async function getAgentById(agentId: string): Promise<Agent | null> {
+  const row = await db.select().from(agents).where(eq(agents.id, agentId)).get()
   return (row as any) ?? null
 }
 
-export function buildAgentCommand(agent: Agent, promptFile: string): { command: string; args: string[] } {
-  switch (agent.type) {
-    case "cursor":
-      return { command: agent.commandPath, args: ["--prompt", promptFile] }
-    case "claude-code":
-      return { command: agent.commandPath, args: ["-p", promptFile] }
-    case "custom":
-      return { command: agent.commandPath, args: [promptFile] }
-    default:
-      return { command: agent.commandPath, args: [promptFile] }
+export function buildAgentCommand(
+  agent: Agent,
+  promptFile: string,
+  workingDir: string
+): { command: string; args: string[] } {
+  const presetRaw = String((agent as any).preset ?? "")
+  if (!isAgentPreset(presetRaw)) {
+    throw new Error(`AGENT_PRESET_INVALID:${presetRaw || "(empty)"}`)
   }
+  return presetSpawnConfig(presetRaw, { promptFile, workingDir })
 }
 
 export async function runAgent(prompt: string, workingDir: string): Promise<{
@@ -42,22 +53,28 @@ export async function runAgentStreaming(
   prompt: string,
   workingDir: string,
   opts?: {
+    agentId?: string | null
     signal?: AbortSignal
     onOutput?: (chunk: string) => void | Promise<void>
   }
 ): Promise<{ success: boolean; logs: string; error?: string }> {
-  const agent = await getEnabledAgent()
+  console.log('Running agent with prompt:', prompt)
+  const agent = opts?.agentId ? await getAgentById(opts.agentId) : await getEnabledAgent()
   if (!agent) throw new Error("AGENT_NOT_FOUND")
 
   const promptFile = join(tmpdir(), `repopilot-${Date.now()}-${uuid()}.txt`)
+  console.log(`Writing prompt to temporary file: ${promptFile}`)
   await Bun.write(promptFile, prompt)
 
-  const { command, args } = buildAgentCommand(agent, promptFile)
+  const { command, args } = buildAgentCommand(agent, promptFile, workingDir)
+  console.log(`Built command for agent ${agent.id}: ${command} ${args.join(" ")}`)
   const proc = Bun.spawn([command, ...args], {
     cwd: workingDir,
     stdout: "pipe",
     stderr: "pipe",
   })
+
+  console.log(`Spawned agent process with PID ${proc.pid}: ${command} ${args.join(" ")}`)
 
   const onOutput = opts?.onOutput
   const signal = opts?.signal

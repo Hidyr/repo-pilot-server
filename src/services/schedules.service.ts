@@ -10,6 +10,7 @@ export async function getScheduleForProject(projectId: string): Promise<Schedule
   const created: Schedule = {
     id: uuid(),
     projectId,
+    agentId: null,
     enabled: false,
     intervalType: "fixed",
     runsPerDay: 1,

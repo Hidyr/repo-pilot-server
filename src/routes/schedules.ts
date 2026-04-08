@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import { eq } from "drizzle-orm"
 import { apiError } from "../http"
 import { db, now } from "../db/client"
-import { projects, schedules } from "../db/schema"
+import { agents, projects, schedules } from "../db/schema"
 import { getScheduleForProject } from "../services/schedules.service"
 import { registerSchedule } from "../services/scheduler.service"
 
@@ -13,6 +13,7 @@ schedulesRouter.get("/:projectId", async (c) => {
   const schedule = await getScheduleForProject(projectId)
   return c.json({
     data: {
+      agentId: schedule.agentId ?? null,
       enabled: schedule.enabled,
       intervalType: schedule.intervalType,
       runsPerDay: schedule.runsPerDay,
@@ -29,6 +30,7 @@ schedulesRouter.get("/:projectId", async (c) => {
 schedulesRouter.put("/:projectId", async (c) => {
   const projectId = c.req.param("projectId")
   const body = (await c.req.json()) as {
+    agentId?: string | null
     enabled: boolean
     intervalType: "fixed" | "random"
     runsPerDay: number
@@ -62,9 +64,27 @@ schedulesRouter.put("/:projectId", async (c) => {
 
   const existing = await getScheduleForProject(projectId)
 
+  let agentId: string | null = null
+  if (body.agentId !== undefined) {
+    if (body.agentId === null || body.agentId === "") {
+      agentId = null
+    } else {
+      const id = String(body.agentId)
+      const a = await db.select().from(agents).where(eq(agents.id, id)).get()
+      if (!a) return apiError(c, "AGENT_NOT_FOUND", "Selected agent not found", 400)
+      if (!(a as any).lastTestOk) {
+        return apiError(c, "AGENT_NOT_TESTED", "Selected agent must be tested before use", 400)
+      }
+      agentId = id
+    }
+  } else {
+    agentId = (existing as any).agentId ?? null
+  }
+
   await db
     .update(schedules)
     .set({
+      agentId,
       enabled: Boolean(body.enabled),
       intervalType: body.intervalType,
       runsPerDay: body.runsPerDay,

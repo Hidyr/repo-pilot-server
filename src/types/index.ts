@@ -28,6 +28,7 @@ export type Feature = {
 export type Schedule = {
   id: string
   projectId: string
+  agentId: string | null
   enabled: boolean
   intervalType: "fixed" | "random"
   runsPerDay: number
@@ -41,13 +42,13 @@ export type Schedule = {
   updatedAt: string
 }
 
-export type AgentType = "cursor" | "claude-code" | "custom"
+/** Built-in coding agent integrations (fixed rows; custom agents come later). */
+export type AgentPreset = "cursor" | "claude_code" | "codex"
 
 export type Agent = {
   id: string
   name: string
-  type: AgentType
-  commandPath: string
+  preset: AgentPreset
   enabled: boolean
   createdAt: string
   updatedAt: string

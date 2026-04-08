@@ -3,6 +3,7 @@ import { apiError } from "../http"
 import { getSetting, hasActiveWork, setSetting } from "../services/settings.service"
 import { queueSnapshot } from "../services/queueSnapshot.service"
 import { broadcastQueue } from "../realtime"
+import { resetDatabase } from "../services/reset.service"
 
 export const settingsRouter = new Hono()
 
@@ -82,5 +83,19 @@ settingsRouter.put("/", async (c) => {
   }
 
   return c.json({ data })
+})
+
+settingsRouter.post("/reset", async (c) => {
+  const locked = await hasActiveWork()
+  if (locked) {
+    return apiError(
+      c,
+      "RESET_LOCKED",
+      "Cannot reset database while work is active. Cancel active queue jobs first.",
+      409
+    )
+  }
+  await resetDatabase()
+  return c.json({ ok: true })
 })
 

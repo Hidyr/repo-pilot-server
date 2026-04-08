@@ -32,6 +32,7 @@ export const schedules = sqliteTable("schedules", {
   projectId: text("project_id")
     .notNull()
     .references(() => projects.id, { onDelete: "cascade" }),
+  agentId: text("agent_id"),
   enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
   intervalType: text("interval_type").notNull().default("fixed"),
   runsPerDay: integer("runs_per_day").notNull().default(1),
@@ -48,9 +49,11 @@ export const schedules = sqliteTable("schedules", {
 export const agents = sqliteTable("agents", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
-  type: text("type").notNull(),
-  commandPath: text("command_path").notNull(),
-  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  preset: text("preset").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
+  lastTestOk: integer("last_test_ok", { mode: "boolean" }).notNull().default(false),
+  lastTestedAt: text("last_tested_at"),
+  lastTestOutput: text("last_test_output"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 })
