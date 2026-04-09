@@ -1,6 +1,6 @@
 import { Hono } from "hono"
 import { cors } from "hono/cors"
-import { runMigrations, seedDefaults } from "./db/client"
+import { db, runMigrations, seedDefaults } from "./db/client"
 import { initializeQueue } from "./services/queue.service"
 import { initializeScheduler } from "./services/scheduler.service"
 import { projectsRouter } from "./routes/projects"
@@ -11,11 +11,15 @@ import { runsRouter } from "./routes/runs"
 import { queueRouter } from "./routes/queue"
 import { settingsRouter } from "./routes/settings"
 import { schedulerRouter } from "./routes/scheduler"
+import { eq } from "drizzle-orm"
+import { runs } from "./db/schema"
 import {
   addBoardSubscriber,
   addQueueSubscriber,
+  addRunLogSubscriber,
   removeBoardSubscriber,
   removeQueueSubscriber,
+  removeRunLogSubscriber,
 } from "./realtime"
 import { queueSnapshot } from "./services/queueSnapshot.service"
 import { boardSnapshot } from "./services/boardSnapshot.service"
@@ -74,11 +78,38 @@ async function start() {
         return new Response("WebSocket upgrade failed", { status: 400 })
       }
 
+      const runLogWsMatch = path.match(/^\/api\/runs\/([^/]+)\/logs\/ws$/)
+      if (runLogWsMatch) {
+        const runId = runLogWsMatch[1]!
+        const ok = server.upgrade(req, { data: { kind: "run_log", runId } })
+        if (ok) return undefined
+        return new Response("WebSocket upgrade failed", { status: 400 })
+      }
+
       return app.fetch(req)
     },
     websocket: {
       async open(ws) {
         const data = ws.data as unknown
+        if (data && typeof data === "object" && (data as any).kind === "run_log") {
+          const runId = String((data as any).runId ?? "")
+          if (!runId) return
+          addRunLogSubscriber(runId, ws as any)
+          const row = await db
+            .select({ logs: runs.logs })
+            .from(runs)
+            .where(eq(runs.id, runId))
+            .get()
+          ws.send(
+            JSON.stringify({
+              type: "run_log_snapshot",
+              runId,
+              logs: row?.logs ?? "",
+            })
+          )
+          return
+        }
+
         if (data && typeof data === "object" && "projectId" in data) {
           const projectId = String((data as any).projectId ?? "")
           if (!projectId) return
@@ -94,6 +125,11 @@ async function start() {
       },
       close(ws) {
         const data = ws.data as unknown
+        if (data && typeof data === "object" && (data as any).kind === "run_log") {
+          const runId = String((data as any).runId ?? "")
+          if (runId) removeRunLogSubscriber(runId, ws as any)
+          return
+        }
         if (data && typeof data === "object" && "projectId" in data) {
           const projectId = String((data as any).projectId ?? "")
           if (projectId) removeBoardSubscriber(projectId, ws as any)
@@ -108,7 +144,6 @@ async function start() {
   })
 
   console.log(`RepoPilot backend running on http://localhost:${PORT}`)
-  console.log(`Queue WebSocket: ws://localhost:${PORT}/api/queue/ws`)
 }
 
 start().catch((e) => {

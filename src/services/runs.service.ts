@@ -1,12 +1,18 @@
 import { eq } from "drizzle-orm"
 import { db, now } from "../db/client"
 import { runs } from "../db/schema"
+import { broadcastRunLog } from "../realtime"
 
 export async function appendLog(runId: string, chunk: string): Promise<void> {
   const row = await db.select({ logs: runs.logs }).from(runs).where(eq(runs.id, runId)).get()
   const prev = row?.logs ?? ""
-  const next = prev ? `${prev}${chunk.endsWith("\n") ? chunk : chunk + "\n"}` : chunk + "\n"
+  const piece = prev ? (chunk.endsWith("\n") ? chunk : chunk + "\n") : chunk + "\n"
+  const next = prev ? `${prev}${piece}` : piece
   await db.update(runs).set({ logs: next }).where(eq(runs.id, runId)).run()
+  broadcastRunLog(
+    runId,
+    JSON.stringify({ type: "run_log_append", runId, chunk: piece })
+  )
 }
 
 export async function setRunStatus(
@@ -25,7 +31,6 @@ export async function setRunStatus(
     .set({
       status,
       ...(extra ?? {}),
-      ...(status === "running" ? {} : {}),
     } as any)
     .where(eq(runs.id, runId))
     .run()

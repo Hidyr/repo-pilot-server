@@ -3,9 +3,12 @@ import type { ServerWebSocket } from "bun"
 export type QueueWs = ServerWebSocket<unknown>
 export type BoardWsData = { projectId: string }
 export type BoardWs = ServerWebSocket<BoardWsData>
+export type RunLogWsData = { kind: "run_log"; runId: string }
+export type RunLogWs = ServerWebSocket<RunLogWsData>
 
 const queueSubscribers = new Set<QueueWs>()
 const boardSubscribersByProject = new Map<string, Set<BoardWs>>()
+const runLogSubscribersByRunId = new Map<string, Set<RunLogWs>>()
 
 export function addQueueSubscriber(ws: QueueWs) {
   queueSubscribers.add(ws)
@@ -52,6 +55,35 @@ export function broadcastBoard(projectId: string, msg: string) {
     }
   }
   if (set.size === 0) boardSubscribersByProject.delete(projectId)
+}
+
+export function addRunLogSubscriber(runId: string, ws: RunLogWs) {
+  let set = runLogSubscribersByRunId.get(runId)
+  if (!set) {
+    set = new Set()
+    runLogSubscribersByRunId.set(runId, set)
+  }
+  set.add(ws)
+}
+
+export function removeRunLogSubscriber(runId: string, ws: RunLogWs) {
+  const set = runLogSubscribersByRunId.get(runId)
+  if (!set) return
+  set.delete(ws)
+  if (set.size === 0) runLogSubscribersByRunId.delete(runId)
+}
+
+export function broadcastRunLog(runId: string, msg: string) {
+  const set = runLogSubscribersByRunId.get(runId)
+  if (!set || set.size === 0) return
+  for (const ws of set) {
+    try {
+      ws.send(msg)
+    } catch {
+      set.delete(ws)
+    }
+  }
+  if (set.size === 0) runLogSubscribersByRunId.delete(runId)
 }
 
 /**
