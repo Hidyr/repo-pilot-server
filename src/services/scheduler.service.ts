@@ -82,10 +82,12 @@ function generateRandomCrons(count: number): string[] {
 }
 
 async function scheduleProjectRun(projectId: string, featuresPerRun: number): Promise<void> {
+  const selected = new Set<string>()
   for (let i = 0; i < featuresPerRun; i++) {
-    const feature = await selectNextFeature(projectId)
+    const feature = await selectNextFeature(projectId, { excludeIds: Array.from(selected) })
     if (!feature) break
     try {
+      selected.add(feature.id)
       await enqueueJob(projectId, feature.id, 0)
     } catch (err) {
       if ((err as any)?.message === "ALREADY_QUEUED") continue

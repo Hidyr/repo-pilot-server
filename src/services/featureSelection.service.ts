@@ -1,22 +1,24 @@
-import { and, asc, eq, inArray } from "drizzle-orm"
+import { and, asc, eq, notInArray } from "drizzle-orm"
 import { db } from "../db/client"
 import { features } from "../db/schema"
 import type { Feature } from "../types"
 
-export async function selectNextFeature(projectId: string): Promise<Feature | null> {
-  const activeStatuses = ["queued", "in_progress"] as const
-  const alreadyActive = await db
-    .select()
-    .from(features)
-    .where(and(eq(features.projectId, projectId), inArray(features.status, activeStatuses as any)))
-    .limit(1)
-    .all()
-  if (alreadyActive.length > 0) return null
+export async function selectNextFeature(
+  projectId: string,
+  opts?: { excludeIds?: string[] }
+): Promise<Feature | null> {
+  const exclude = (opts?.excludeIds ?? []).filter(Boolean)
 
   const pending = await db
     .select()
     .from(features)
-    .where(and(eq(features.projectId, projectId), eq(features.status, "pending")))
+    .where(
+      and(
+        eq(features.projectId, projectId),
+        eq(features.status, "pending"),
+        ...(exclude.length ? [notInArray(features.id, exclude)] : [])
+      )
+    )
     .orderBy(asc(features.sortOrder))
     .limit(1)
     .all()
