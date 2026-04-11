@@ -256,7 +256,7 @@ export async function runMigrations(): Promise<void> {
 export async function seedDefaults(): Promise<void> {
   const defaults: Array<{ key: string; value: string }> = [
     { key: "theme", value: "dark" },
-    { key: "autostart", value: "false" },
+    { key: "autostart", value: "true" },
     { key: "max_concurrent_runs", value: "4" },
     { key: "minimize_to_tray", value: "true" },
     // Default base directory for git clones (used when the client omits clonePath).

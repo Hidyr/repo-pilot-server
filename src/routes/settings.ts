@@ -10,7 +10,7 @@ export const settingsRouter = new Hono()
 settingsRouter.get("/", async (c) => {
   const locked = await hasActiveWork()
   const theme = (await getSetting("theme")) ?? "dark"
-  const autostart = (await getSetting("autostart")) ?? "false"
+  const autostart = (await getSetting("autostart")) ?? "true"
   const max_concurrent_runs = (await getSetting("max_concurrent_runs")) ?? "4"
   const minimize_to_tray = (await getSetting("minimize_to_tray")) ?? "true"
   const git_clone_base_dir = (await getSetting("git_clone_base_dir")) ?? ""
@@ -71,7 +71,7 @@ settingsRouter.put("/", async (c) => {
 
   const data = {
     theme: (await getSetting("theme")) ?? "dark",
-    autostart: (await getSetting("autostart")) ?? "false",
+    autostart: (await getSetting("autostart")) ?? "true",
     max_concurrent_runs: (await getSetting("max_concurrent_runs")) ?? "4",
     minimize_to_tray: (await getSetting("minimize_to_tray")) ?? "true",
     git_clone_base_dir: (await getSetting("git_clone_base_dir")) ?? "",
