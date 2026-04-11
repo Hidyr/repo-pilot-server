@@ -20,6 +20,8 @@ export async function getScheduleForProject(projectId: string): Promise<Schedule
     gitAutoCommit: true,
     gitAutoPush: false,
     gitAutoMerge: false,
+    gitRunStartMode: "current",
+    gitRunBranch: null,
     createdAt: now(),
     updatedAt: now(),
   }

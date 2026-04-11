@@ -27,6 +27,8 @@ export type Feature = {
   updatedAt: string
 }
 
+export type GitRunStartMode = "current" | "from_base" | "branch"
+
 export type Schedule = {
   id: string
   projectId: string
@@ -40,6 +42,8 @@ export type Schedule = {
   gitAutoCommit: boolean
   gitAutoPush: boolean
   gitAutoMerge: boolean
+  gitRunStartMode: GitRunStartMode
+  gitRunBranch: string | null
   createdAt: string
   updatedAt: string
 }

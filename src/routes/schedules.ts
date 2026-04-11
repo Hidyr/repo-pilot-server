@@ -7,6 +7,8 @@ import { resolveAgentForSchedule } from "../services/agent.service"
 import { getScheduleForProject } from "../services/schedules.service"
 import { registerSchedule } from "../services/scheduler.service"
 import { purgeWaitingJobsForProject } from "../services/queue.service"
+import { assertSafeGitRef } from "../services/git.service"
+import type { GitRunStartMode } from "../types"
 
 export const schedulesRouter = new Hono()
 
@@ -25,6 +27,8 @@ schedulesRouter.get("/:projectId", async (c) => {
       gitAutoCommit: schedule.gitAutoCommit,
       gitAutoPush: schedule.gitAutoPush,
       gitAutoMerge: schedule.gitAutoMerge,
+      gitRunStartMode: (schedule as { gitRunStartMode?: string }).gitRunStartMode ?? "current",
+      gitRunBranch: (schedule as { gitRunBranch?: string | null }).gitRunBranch ?? null,
     },
   })
 })
@@ -42,11 +46,30 @@ schedulesRouter.put("/:projectId", async (c) => {
     gitAutoCommit: boolean
     gitAutoPush: boolean
     gitAutoMerge: boolean
+    gitRunStartMode?: GitRunStartMode
+    gitRunBranch?: string | null
   }
 
   const proj = await db.select().from(projects).where(eq(projects.id, projectId)).get()
   if (!proj) return apiError(c, "PROJECT_NOT_FOUND", "Project not found", 404)
   const isGitRepo = Boolean((proj as any).isGitRepo)
+
+  const rawMode = body.gitRunStartMode
+  const gitRunStartMode: GitRunStartMode =
+    rawMode === "from_base" || rawMode === "branch" || rawMode === "current" ? rawMode : "current"
+
+  let gitRunBranch: string | null = null
+  if (isGitRepo && gitRunStartMode === "branch") {
+    const t = typeof body.gitRunBranch === "string" ? body.gitRunBranch.trim() : ""
+    if (!t) {
+      return apiError(c, "GIT_RUN_BRANCH_REQUIRED", "Branch name is required when starting from a fixed branch", 400)
+    }
+    try {
+      gitRunBranch = assertSafeGitRef(t)
+    } catch {
+      return apiError(c, "INVALID_BRANCH", "Invalid branch name", 400)
+    }
+  }
 
   if (isGitRepo) {
     if (body.gitAutoMerge && !body.gitAutoPush) {
@@ -101,6 +124,8 @@ schedulesRouter.put("/:projectId", async (c) => {
       gitAutoCommit: Boolean(body.gitAutoCommit),
       gitAutoPush: Boolean(body.gitAutoPush),
       gitAutoMerge: Boolean(body.gitAutoMerge),
+      gitRunStartMode,
+      gitRunBranch,
       updatedAt: now(),
     } as any)
     .where(eq(schedules.id, existing.id))

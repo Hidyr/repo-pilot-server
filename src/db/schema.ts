@@ -44,6 +44,10 @@ export const schedules = sqliteTable("schedules", {
   gitAutoCommit: integer("git_auto_commit", { mode: "boolean" }).notNull().default(true),
   gitAutoPush: integer("git_auto_push", { mode: "boolean" }).notNull().default(false),
   gitAutoMerge: integer("git_auto_merge", { mode: "boolean" }).notNull().default(false),
+  /** `current` | `from_base` | `branch` — how to pick the working tree before the agent runs */
+  gitRunStartMode: text("git_run_start_mode").notNull().default("current"),
+  /** When `gitRunStartMode` is `branch`, checkout this local branch before the run */
+  gitRunBranch: text("git_run_branch"),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 })

@@ -2,6 +2,8 @@ import { existsSync, readFileSync, statSync } from "node:fs"
 import { join, normalize } from "node:path"
 import simpleGit, { type SimpleGit } from "simple-git"
 
+import type { GitRunStartMode } from "../types"
+
 const git = (localPath: string): SimpleGit => simpleGit(localPath)
 
 /**
@@ -134,9 +136,131 @@ export function assertSafeGitRef(name: string): string {
   return t
 }
 
+/** Slug from feature title for a local branch name (no feat/bug prefix). */
+export function branchNameFromFeatureTitle(title: string, featureId: string): string {
+  let slug = title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-+/g, "-")
+    .slice(0, 120)
+  if (!slug) {
+    slug =
+      featureId
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .replace(/-+/g, "-")
+        .slice(0, 48) || "run"
+  }
+  return assertSafeGitRef(slug)
+}
+
 export async function gitCheckoutBranch(localPath: string, branch: string): Promise<void> {
   const b = assertSafeGitRef(branch)
   await git(localPath).checkout(b)
+}
+
+async function readCheckoutState(g: SimpleGit): Promise<{ ref: string; detached: boolean }> {
+  const abbr = (await g.revparse(["--abbrev-ref", "HEAD"])).trim()
+  if (abbr === "HEAD") {
+    const oid = (await g.revparse(["HEAD"])).trim()
+    return { ref: oid, detached: true }
+  }
+  return { ref: abbr, detached: false }
+}
+
+async function restoreCheckoutState(g: SimpleGit, state: { ref: string; detached: boolean }): Promise<void> {
+  await g.checkout(state.ref)
+}
+
+/**
+ * Prepares the repo checkout before an automated feature run.
+ * - `current`: optional pull on the current branch (no restore).
+ * - `from_base`: checkout default branch, optional pull, create/reset a branch named from the feature title (slug) from HEAD, restore previous ref when `finish()` runs.
+ * - `branch`: checkout `workBranch`, optional pull, restore previous ref when `finish()` runs.
+ */
+export async function prepareAutomationGitWorkspace(
+  localPath: string,
+  params: {
+    mode: GitRunStartMode
+    workBranch: string | null
+    defaultBranch: string | null
+    autoPull: boolean
+    featureTitle: string
+    featureId: string
+  },
+  log: (line: string) => void | Promise<void>
+): Promise<null | (() => Promise<void>)> {
+  const g = git(localPath)
+  const write = async (line: string) => {
+    await log(line)
+  }
+
+  if (params.mode === "current") {
+    if (params.autoPull) {
+      await write("[GIT] Pulling latest changes...")
+      await gitPull(localPath)
+      await write("[GIT] Pull complete.")
+    }
+    return null
+  }
+
+  const prior = await readCheckoutState(g)
+
+  if (params.mode === "branch") {
+    const name = params.workBranch?.trim()
+    if (!name) throw new Error("GIT_RUN_BRANCH_REQUIRED")
+    const b = assertSafeGitRef(name)
+    try {
+      await write(`[GIT] Checking out ${b}...`)
+      await g.checkout(b)
+      if (params.autoPull) {
+        await write("[GIT] Pulling latest changes...")
+        await gitPull(localPath)
+        await write("[GIT] Pull complete.")
+      }
+    } catch (err) {
+      try {
+        await restoreCheckoutState(g, prior)
+      } catch {
+        /* ignore */
+      }
+      throw err
+    }
+    return async () => {
+      await write(`[GIT] Restoring checkout (${prior.ref})...`)
+      await restoreCheckoutState(g, prior)
+    }
+  }
+
+  // from_base
+  const baseNameRaw = params.defaultBranch?.trim() || "main"
+  const base = assertSafeGitRef(baseNameRaw)
+  try {
+    await write(`[GIT] Starting from base branch ${base}...`)
+    await g.checkout(base)
+    if (params.autoPull) {
+      await write("[GIT] Pulling latest changes...")
+      await gitPull(localPath)
+      await write("[GIT] Pull complete.")
+    }
+    const featBranch = branchNameFromFeatureTitle(params.featureTitle, params.featureId)
+    await write(`[GIT] Using branch ${featBranch} from feature name (create/reset from ${base})...`)
+    await g.checkout(["-B", featBranch])
+  } catch (err) {
+    try {
+      await restoreCheckoutState(g, prior)
+    } catch {
+      /* ignore */
+    }
+    throw err
+  }
+  return async () => {
+    await write(`[GIT] Restoring checkout (${prior.ref})...`)
+    await restoreCheckoutState(g, prior)
+  }
 }
 
 /** Local branches and current checkout (branch name, or short sha when detached). */

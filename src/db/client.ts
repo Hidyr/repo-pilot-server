@@ -178,6 +178,10 @@ export async function runMigrations(): Promise<void> {
   if (!hasColumn("schedules", "git_auto_commit")) addColumn("schedules", "git_auto_commit INTEGER NOT NULL DEFAULT 1")
   if (!hasColumn("schedules", "git_auto_push")) addColumn("schedules", "git_auto_push INTEGER NOT NULL DEFAULT 0")
   if (!hasColumn("schedules", "git_auto_merge")) addColumn("schedules", "git_auto_merge INTEGER NOT NULL DEFAULT 0")
+  if (!hasColumn("schedules", "git_run_start_mode")) {
+    addColumn("schedules", "git_run_start_mode TEXT NOT NULL DEFAULT 'current'")
+  }
+  if (!hasColumn("schedules", "git_run_branch")) addColumn("schedules", "git_run_branch TEXT")
   if (!hasColumn("schedules", "created_at")) addColumn("schedules", "created_at TEXT NOT NULL DEFAULT ''")
   if (!hasColumn("schedules", "updated_at")) addColumn("schedules", "updated_at TEXT NOT NULL DEFAULT ''")
 

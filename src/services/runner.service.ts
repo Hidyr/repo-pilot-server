@@ -1,7 +1,7 @@
 import { desc, eq } from "drizzle-orm"
 import { db, now } from "../db/client"
 import { features, projects, runs } from "../db/schema"
-import type { Feature, Project, QueueJob, Schedule } from "../types"
+import type { Feature, GitRunStartMode, Project, QueueJob, Schedule } from "../types"
 import { resolveAgentIdForSchedule, runAgentStreaming } from "./agent.service"
 import { appendLog } from "./runs.service"
 import {
@@ -9,8 +9,8 @@ import {
   gitCommit,
   gitHasUncommittedChanges,
   gitMergeToDefault,
-  gitPull,
   gitPush,
+  prepareAutomationGitWorkspace,
 } from "./git.service"
 
 export function buildPrompt(project: Project, feature: Feature): string {
@@ -71,13 +71,27 @@ export async function executeFeatureRun(
   await db.update(features).set({ status: "in_progress", updatedAt: now() } as any).where(eq(features.id, feature.id)).run()
   await db.update(runs).set({ status: "running", startedAt: now() } as any).where(eq(runs.id, run.id)).run()
 
+  const useGit = project.isGitRepo === true
+  let finishGitWorkspace: (() => Promise<void>) | null = null
   try {
-    const useGit = project.isGitRepo === true
-
-    if (useGit && schedule.gitAutoPull) {
-      await appendLog(run.id, "[GIT] Pulling latest changes...")
-      await gitPull(project.localPath)
-      await appendLog(run.id, "[GIT] Pull complete.")
+    if (useGit) {
+      const raw = schedule.gitRunStartMode
+      const mode: GitRunStartMode =
+        raw === "from_base" || raw === "branch" || raw === "current" ? raw : "current"
+      finishGitWorkspace = await prepareAutomationGitWorkspace(
+        project.localPath,
+        {
+          mode,
+          workBranch: schedule.gitRunBranch ?? null,
+          defaultBranch: project.defaultBranch,
+          autoPull: schedule.gitAutoPull,
+          featureTitle: feature.title,
+          featureId: feature.id,
+        },
+        async (line) => {
+          await appendLog(run.id, line)
+        }
+      )
     }
 
     const prompt = buildPrompt(project, feature)
@@ -190,6 +204,17 @@ export async function executeFeatureRun(
         run.id,
         "[FEATURE] Frozen because the last two runs failed. Unfreeze on the feature page when you want automation to pick it up again."
       )
+    }
+  } finally {
+    if (finishGitWorkspace) {
+      try {
+        await finishGitWorkspace()
+      } catch (restoreErr) {
+        await appendLog(
+          run.id,
+          `[GIT WARNING] Restore checkout failed: ${(restoreErr as any)?.message ?? String(restoreErr)}`
+        )
+      }
     }
   }
 }
