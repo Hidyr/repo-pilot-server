@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { unlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -16,6 +16,44 @@ export async function getEnabledAgent(): Promise<Agent | null> {
       (rank.get(a.preset as AgentPreset) ?? 99) - (rank.get(b.preset as AgentPreset) ?? 99)
   )
   return (rows[0] as Agent) ?? null
+}
+
+/** Enabled agents that passed a successful smoke test (used for automation and queue runs). */
+export async function getRunnableAgent(): Promise<Agent | null> {
+  const rows = await db
+    .select()
+    .from(agents)
+    .where(and(eq(agents.enabled, true), eq(agents.lastTestOk, true)))
+    .all()
+  if (rows.length === 0) return null
+  const rank = new Map(BUILTIN_AGENT_ORDER.map((p, i) => [p, i]))
+  rows.sort(
+    (a, b) =>
+      (rank.get(a.preset as AgentPreset) ?? 99) - (rank.get(b.preset as AgentPreset) ?? 99)
+  )
+  return (rows[0] as Agent) ?? null
+}
+
+/** Agent that will run work for this schedule: explicit selection if tested, else first runnable default. */
+export async function resolveAgentForSchedule(schedule: {
+  agentId: string | null
+}): Promise<Agent | null> {
+  if (schedule.agentId) {
+    const a = await getAgentById(schedule.agentId)
+    if (!a) return null
+    if (!(a as { enabled?: boolean }).enabled || !(a as { lastTestOk?: boolean }).lastTestOk) {
+      return null
+    }
+    return a as Agent
+  }
+  return getRunnableAgent()
+}
+
+export async function resolveAgentIdForSchedule(schedule: {
+  agentId: string | null
+}): Promise<string | null> {
+  const a = await resolveAgentForSchedule(schedule)
+  return a?.id ?? null
 }
 
 export async function getAgentById(agentId: string): Promise<Agent | null> {
@@ -58,7 +96,7 @@ export async function runAgentStreaming(
     onOutput?: (chunk: string) => void | Promise<void>
   }
 ): Promise<{ success: boolean; logs: string; error?: string }> {
-  const agent = opts?.agentId ? await getAgentById(opts.agentId) : await getEnabledAgent()
+  const agent = opts?.agentId ? await getAgentById(opts.agentId) : await getRunnableAgent()
   if (!agent) throw new Error("AGENT_NOT_FOUND")
 
   const promptFile = join(tmpdir(), `repopilot-${Date.now()}-${uuid()}.txt`)

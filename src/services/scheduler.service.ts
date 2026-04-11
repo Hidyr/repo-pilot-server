@@ -3,8 +3,10 @@ import { eq } from "drizzle-orm"
 import { db } from "../db/client"
 import { schedules } from "../db/schema"
 import type { Schedule } from "../types"
-import { enqueueJob } from "./queue.service"
+import { resolveAgentForSchedule } from "./agent.service"
 import { selectNextFeature } from "./featureSelection.service"
+import { enqueueJob } from "./queue.service"
+import { getScheduleForProject } from "./schedules.service"
 
 const activeJobs = new Map<string, CronJob[]>()
 let schedulerPaused = false
@@ -14,6 +16,11 @@ export async function getAllEnabledSchedules(): Promise<Schedule[]> {
 }
 
 export async function initializeScheduler(): Promise<void> {
+  await refreshSchedulerRegistrations()
+}
+
+/** Re-evaluate cron jobs for every enabled schedule (e.g. after agent enable/disable or test). */
+export async function refreshSchedulerRegistrations(): Promise<void> {
   const all = await getAllEnabledSchedules()
   for (const s of all) await registerSchedule(s)
 }
@@ -27,6 +34,7 @@ export async function registerSchedule(schedule: Schedule): Promise<void> {
   await deregisterSchedule(schedule.projectId)
   if (schedulerPaused) return
   if (!schedule.enabled) return
+  if (!(await resolveAgentForSchedule(schedule as { agentId: string | null }))) return
 
   const jobs: CronJob[] = []
   const cronExprs =
@@ -52,8 +60,7 @@ export function pauseAllSchedules(): void {
 
 export async function resumeAllSchedules(): Promise<void> {
   schedulerPaused = false
-  const all = await getAllEnabledSchedules()
-  for (const s of all) await registerSchedule(s)
+  await refreshSchedulerRegistrations()
 }
 
 export function schedulerStatus(): { paused: boolean } {
@@ -82,6 +89,9 @@ function generateRandomCrons(count: number): string[] {
 }
 
 async function scheduleProjectRun(projectId: string, featuresPerRun: number): Promise<void> {
+  const schedule = await getScheduleForProject(projectId)
+  if (!(await resolveAgentForSchedule(schedule as { agentId: string | null }))) return
+
   const selected = new Set<string>()
   for (let i = 0; i < featuresPerRun; i++) {
     const feature = await selectNextFeature(projectId, { excludeIds: Array.from(selected) })
@@ -90,7 +100,9 @@ async function scheduleProjectRun(projectId: string, featuresPerRun: number): Pr
       selected.add(feature.id)
       await enqueueJob(projectId, feature.id, 0)
     } catch (err) {
-      if ((err as any)?.message === "ALREADY_QUEUED") continue
+      const m = (err as { message?: string })?.message
+      if (m === "ALREADY_QUEUED") continue
+      if (m === "NO_RUNNABLE_AGENT") return
     }
   }
 }

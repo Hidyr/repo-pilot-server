@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm"
 import { db, now, uuid } from "../db/client"
 import { features, queueJobs, runs } from "../db/schema"
+import { resolveAgentIdForSchedule } from "./agent.service"
 import { getMaxConcurrentRuns } from "./settings.service"
 import { getScheduleForProject } from "./schedules.service"
 import { executeFeatureRun } from "./runner.service"
@@ -48,6 +49,11 @@ export async function enqueueJob(
   const featRow = await db.select().from(features).where(eq(features.id, featureId)).get()
   if (!featRow) throw new Error("FEATURE_NOT_FOUND")
   if ((featRow as { frozen?: boolean }).frozen) throw new Error("FEATURE_FROZEN")
+
+  const schedule = await getScheduleForProject(projectId)
+  if (!(await resolveAgentIdForSchedule(schedule as { agentId: string | null }))) {
+    throw new Error("NO_RUNNABLE_AGENT")
+  }
 
   const jobId = uuid()
   const createdAt = now()

@@ -5,6 +5,7 @@ import { db, now } from "../db/client"
 import { agents, schedules } from "../db/schema"
 import { BUILTIN_AGENT_ORDER, isAgentPreset } from "../services/agent-presets"
 import { runAgentSmokeTest, runAgentSmokeTestStreaming } from "../services/agent-smoke-test"
+import { refreshSchedulerRegistrations } from "../services/scheduler.service"
 import type { AgentPreset } from "../types"
 
 export const agentsRouter = new Hono()
@@ -60,6 +61,7 @@ agentsRouter.post("/:id/test/stream", async (c) => {
           })
           .where(eq(agents.id, id))
           .run()
+        await refreshSchedulerRegistrations()
         send(
           result.ok
             ? { t: "done", ok: true, message: result.message }
@@ -76,6 +78,7 @@ agentsRouter.post("/:id/test/stream", async (c) => {
           })
           .where(eq(agents.id, id))
           .run()
+        await refreshSchedulerRegistrations()
         send({
           t: "done",
           ok: false,
@@ -138,6 +141,7 @@ agentsRouter.put("/:id", async (c) => {
     .run()
 
   const updated = await db.select().from(agents).where(eq(agents.id, id)).get()
+  await refreshSchedulerRegistrations()
   return c.json({ data: updated })
 })
 
@@ -167,6 +171,7 @@ agentsRouter.post("/:id/deactivate", async (c) => {
     .run()
 
   const updated = await db.select().from(agents).where(eq(agents.id, id)).get()
+  await refreshSchedulerRegistrations()
   return c.json({ data: updated })
 })
 
@@ -191,6 +196,7 @@ agentsRouter.post("/:id/test", async (c) => {
     })
     .where(eq(agents.id, id))
     .run()
+  await refreshSchedulerRegistrations()
   if (result.ok) {
     return c.json({ success: true, message: result.message })
   }

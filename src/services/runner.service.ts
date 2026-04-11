@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm"
 import { db, now } from "../db/client"
 import { features, projects, runs } from "../db/schema"
 import type { Feature, Project, QueueJob, Schedule } from "../types"
-import { getEnabledAgent, runAgentStreaming } from "./agent.service"
+import { resolveAgentIdForSchedule, runAgentStreaming } from "./agent.service"
 import { appendLog } from "./runs.service"
 import {
   gitAddAll,
@@ -82,10 +82,7 @@ export async function executeFeatureRun(
 
     const prompt = buildPrompt(project, feature)
     await appendLog(run.id, "[AGENT] Starting...")
-    const selectedAgentId =
-      schedule.agentId ??
-      (await getEnabledAgent())?.id ??
-      null
+    const selectedAgentId = await resolveAgentIdForSchedule(schedule)
     if (!selectedAgentId) {
       throw new Error("AGENT_NOT_FOUND")
     }

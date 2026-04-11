@@ -166,6 +166,14 @@ featuresRouter.put("/:id", async (c) => {
     } catch (e) {
       const msg = (e as any)?.message ?? String(e)
       if (msg === "ALREADY_QUEUED") return apiError(c, "ALREADY_QUEUED", "Feature already queued", 409)
+      if (msg === "NO_RUNNABLE_AGENT") {
+        return apiError(
+          c,
+          "NO_RUNNABLE_AGENT",
+          "Enable and successfully test an agent before starting a run.",
+          400
+        )
+      }
       if (msg === "FEATURE_FROZEN") {
         return apiError(c, "FEATURE_FROZEN", "This feature is frozen. Unfreeze it before starting a run.", 409)
       }

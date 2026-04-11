@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm"
 import { apiError } from "../http"
 import { db, now } from "../db/client"
 import { agents, projects, schedules } from "../db/schema"
+import { resolveAgentForSchedule } from "../services/agent.service"
 import { getScheduleForProject } from "../services/schedules.service"
 import { registerSchedule } from "../services/scheduler.service"
 import { purgeWaitingJobsForProject } from "../services/queue.service"
@@ -83,11 +84,15 @@ schedulesRouter.put("/:projectId", async (c) => {
     agentId = (existing as any).agentId ?? null
   }
 
+  const requestedEnabled = Boolean(body.enabled)
+  const enabledEffective =
+    requestedEnabled && !!(await resolveAgentForSchedule({ agentId }))
+
   await db
     .update(schedules)
     .set({
       agentId,
-      enabled: Boolean(body.enabled),
+      enabled: enabledEffective,
       intervalType: body.intervalType,
       runsPerDay: body.runsPerDay,
       featuresPerRun: body.featuresPerRun,
@@ -104,10 +109,20 @@ schedulesRouter.put("/:projectId", async (c) => {
   const updated = await db.select().from(schedules).where(eq(schedules.id, existing.id)).get()
   if (updated) await registerSchedule(updated as any)
 
-  if (wasEnabled && !Boolean(body.enabled)) {
+  if (wasEnabled && !enabledEffective) {
     await purgeWaitingJobsForProject(projectId)
   }
 
-  return c.json({ data: updated })
+  return c.json({
+    data: updated,
+    ...(requestedEnabled && !enabledEffective
+      ? {
+          meta: {
+            warning:
+              "Automation was saved as off: enable and successfully test an agent (or pick a tested agent for this project) before automation can run.",
+          },
+        }
+      : {}),
+  })
 })
 
