@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm"
+import { desc, eq } from "drizzle-orm"
 import { db, now } from "../db/client"
 import { features, projects, runs } from "../db/schema"
 import type { Feature, Project, QueueJob, Schedule } from "../types"
@@ -163,6 +163,29 @@ export async function executeFeatureRun(
       .where(eq(runs.id, run.id))
       .run()
     await appendLog(run.id, `[ERROR] ${message}`)
+
+    const lastTwo = await db
+      .select()
+      .from(runs)
+      .where(eq(runs.featureId, feature.id))
+      .orderBy(desc(runs.startedAt))
+      .limit(2)
+      .all()
+    const lastTwoBothFailed =
+      lastTwo.length === 2 &&
+      lastTwo[0]!.status === "failed" &&
+      lastTwo[1]!.status === "failed"
+    if (lastTwoBothFailed) {
+      await db
+        .update(features)
+        .set({ frozen: true, updatedAt: now() } as any)
+        .where(eq(features.id, feature.id))
+        .run()
+      await appendLog(
+        run.id,
+        "[FEATURE] Frozen because the last two runs failed. Unfreeze on the feature page when you want automation to pick it up again."
+      )
+    }
   }
 }
 

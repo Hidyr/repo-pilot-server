@@ -44,6 +44,7 @@ featuresRouter.post("/", async (c) => {
     description: body.description ?? null,
     userPrompt: typeof body.userPrompt === "string" ? body.userPrompt : null,
     status: "pending",
+    frozen: false,
     sortOrder,
     createdAt: now(),
     updatedAt: now(),
@@ -86,13 +87,26 @@ featuresRouter.get("/:id", async (c) => {
 featuresRouter.put("/:id", async (c) => {
   const id = c.req.param("id")
   const body = (await c.req.json()) as Record<string, unknown>
-  const cur = await db.select().from(features).where(eq(features.id, id)).get()
+  let cur = await db.select().from(features).where(eq(features.id, id)).get()
   if (!cur) return apiError(c, "FEATURE_NOT_FOUND", "Feature not found", 404)
+
+  let queueTouched = false
+
+  if (
+    body.frozen === true &&
+    !(cur as any).frozen &&
+    inArrayLiteral(String((cur as any).status ?? ""), ["queued", "in_progress"])
+  ) {
+    await purgeFeatureQueueState(id, String((cur as any).projectId))
+    queueTouched = true
+    cur = (await db.select().from(features).where(eq(features.id, id)).get())!
+  }
 
   const prevStatus = String((cur as any).status ?? "")
   let nextStatus = body.status !== undefined ? String(body.status) : prevStatus
 
-  let queueTouched = false
+  const nextFrozen =
+    body.frozen !== undefined ? Boolean(body.frozen) : Boolean((cur as any).frozen)
   const leavingRunLane = inArrayLiteral(prevStatus, ["queued", "in_progress"]) && !inArrayLiteral(nextStatus, ["queued", "in_progress"])
 
   if (leavingRunLane) {
@@ -135,6 +149,9 @@ featuresRouter.put("/:id", async (c) => {
 
   // Entering the run lane: client usually sends status=in_progress.
   if (nextStatus === "in_progress" && prevStatus !== "in_progress") {
+    if (nextFrozen) {
+      return apiError(c, "FEATURE_FROZEN", "Unfreeze the feature before starting a run.", 409)
+    }
     try {
       await enqueueJob(String((cur as any).projectId), id, 1)
       queueTouched = true
@@ -149,6 +166,9 @@ featuresRouter.put("/:id", async (c) => {
     } catch (e) {
       const msg = (e as any)?.message ?? String(e)
       if (msg === "ALREADY_QUEUED") return apiError(c, "ALREADY_QUEUED", "Feature already queued", 409)
+      if (msg === "FEATURE_FROZEN") {
+        return apiError(c, "FEATURE_FROZEN", "This feature is frozen. Unfreeze it before starting a run.", 409)
+      }
       return apiError(c, "INTERNAL", msg, 500)
     }
   }
@@ -159,6 +179,7 @@ featuresRouter.put("/:id", async (c) => {
   if (body.userPrompt !== undefined) update.userPrompt = body.userPrompt
   if (body.sortOrder !== undefined) update.sortOrder = body.sortOrder
   if (body.status !== undefined) update.status = nextStatus
+  if (body.frozen !== undefined) update.frozen = Boolean(body.frozen)
 
   await db.update(features).set(update as any).where(eq(features.id, id)).run()
 

@@ -72,6 +72,9 @@ runsRouter.post("/trigger", async (c) => {
   } catch (e) {
     const msg = (e as any)?.message ?? String(e)
     if (msg === "ALREADY_QUEUED") return apiError(c, "ALREADY_QUEUED", "Feature already queued", 409)
+    if (msg === "FEATURE_FROZEN") {
+      return apiError(c, "FEATURE_FROZEN", "That feature is frozen. Unfreeze it on the feature page to queue it.", 409)
+    }
     return apiError(c, "INTERNAL", msg, 500)
   }
 })

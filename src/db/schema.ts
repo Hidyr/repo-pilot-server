@@ -22,6 +22,8 @@ export const features = sqliteTable("features", {
   description: text("description"),
   userPrompt: text("user_prompt"),
   status: text("status").notNull().default("pending"),
+  /** When true, automation and manual queue runs skip this feature until unfrozen. */
+  frozen: integer("frozen", { mode: "boolean" }).notNull().default(false),
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),

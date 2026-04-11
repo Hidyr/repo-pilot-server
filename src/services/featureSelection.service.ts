@@ -16,6 +16,7 @@ export async function selectNextFeature(
       and(
         eq(features.projectId, projectId),
         eq(features.status, "pending"),
+        eq(features.frozen, false),
         ...(exclude.length ? [notInArray(features.id, exclude)] : [])
       )
     )

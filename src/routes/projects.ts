@@ -38,7 +38,7 @@ function stats(projectId: string) {
   const pendingCount = (
     sqlite
       .prepare(
-        "SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('pending','failed')"
+        "SELECT COUNT(*) as c FROM features WHERE project_id = ? AND status IN ('pending','failed') AND COALESCE(frozen, 0) = 0"
       )
       .get(projectId) as { c: number }
   )?.c

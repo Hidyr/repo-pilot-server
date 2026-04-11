@@ -45,6 +45,10 @@ export async function enqueueJob(
     .all()
   if (existing.length > 0) throw new Error("ALREADY_QUEUED")
 
+  const featRow = await db.select().from(features).where(eq(features.id, featureId)).get()
+  if (!featRow) throw new Error("FEATURE_NOT_FOUND")
+  if ((featRow as { frozen?: boolean }).frozen) throw new Error("FEATURE_FROZEN")
+
   const jobId = uuid()
   const createdAt = now()
   await db

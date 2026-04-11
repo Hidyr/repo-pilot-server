@@ -20,6 +20,8 @@ export type Feature = {
   description: string | null
   userPrompt: string | null
   status: FeatureStatus
+  /** Excluded from automation and from starting a queue run until cleared. */
+  frozen: boolean
   sortOrder: number
   createdAt: string
   updatedAt: string

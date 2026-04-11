@@ -171,6 +171,7 @@ export async function runMigrations(): Promise<void> {
   if (!hasColumn("features", "user_prompt")) addColumn("features", "user_prompt TEXT")
   if (!hasColumn("features", "created_at")) addColumn("features", "created_at TEXT NOT NULL DEFAULT ''")
   if (!hasColumn("features", "updated_at")) addColumn("features", "updated_at TEXT NOT NULL DEFAULT ''")
+  if (!hasColumn("features", "frozen")) addColumn("features", "frozen INTEGER NOT NULL DEFAULT 0")
 
   if (!hasColumn("schedules", "agent_id")) addColumn("schedules", "agent_id TEXT")
   if (!hasColumn("schedules", "git_auto_pull")) addColumn("schedules", "git_auto_pull INTEGER NOT NULL DEFAULT 1")
