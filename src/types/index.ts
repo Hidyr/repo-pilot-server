@@ -11,7 +11,7 @@ export type Project = {
   updatedAt: string
 }
 
-export type FeatureStatus = "pending" | "queued" | "in_progress" | "done" | "failed"
+export type FeatureStatus = "pending" | "queued" | "in_progress" | "review" | "done" | "failed"
 
 export type Feature = {
   id: string

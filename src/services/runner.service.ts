@@ -141,7 +141,7 @@ export async function executeFeatureRun(
       }
     }
 
-    await db.update(features).set({ status: "done", updatedAt: now() } as any).where(eq(features.id, feature.id)).run()
+    await db.update(features).set({ status: "review", updatedAt: now() } as any).where(eq(features.id, feature.id)).run()
     await db.update(runs).set({ status: "success", completedAt: now() } as any).where(eq(runs.id, run.id)).run()
   } catch (error) {
     const message = (error as any)?.message ?? String(error)
