@@ -17,7 +17,7 @@ export async function getScheduleForProject(projectId: string): Promise<Schedule
     featuresPerRun: 1,
     executionTimes: JSON.stringify([]),
     gitAutoPull: true,
-    gitAutoCommit: true,
+    gitAutoCommit: false,
     gitAutoPush: false,
     gitAutoMerge: false,
     gitRunStartMode: "current",

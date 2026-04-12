@@ -41,7 +41,7 @@ export const schedules = sqliteTable("schedules", {
   featuresPerRun: integer("features_per_run").notNull().default(1),
   executionTimes: text("execution_times"),
   gitAutoPull: integer("git_auto_pull", { mode: "boolean" }).notNull().default(true),
-  gitAutoCommit: integer("git_auto_commit", { mode: "boolean" }).notNull().default(true),
+  gitAutoCommit: integer("git_auto_commit", { mode: "boolean" }).notNull().default(false),
   gitAutoPush: integer("git_auto_push", { mode: "boolean" }).notNull().default(false),
   gitAutoMerge: integer("git_auto_merge", { mode: "boolean" }).notNull().default(false),
   /** `current` | `from_base` | `branch` — how to pick the working tree before the agent runs */

@@ -83,7 +83,7 @@ export async function runMigrations(): Promise<void> {
       features_per_run INTEGER NOT NULL DEFAULT 1,
       execution_times TEXT,
       git_auto_pull INTEGER NOT NULL DEFAULT 1,
-      git_auto_commit INTEGER NOT NULL DEFAULT 1,
+      git_auto_commit INTEGER NOT NULL DEFAULT 0,
       git_auto_push INTEGER NOT NULL DEFAULT 0,
       git_auto_merge INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
@@ -175,7 +175,7 @@ export async function runMigrations(): Promise<void> {
 
   if (!hasColumn("schedules", "agent_id")) addColumn("schedules", "agent_id TEXT")
   if (!hasColumn("schedules", "git_auto_pull")) addColumn("schedules", "git_auto_pull INTEGER NOT NULL DEFAULT 1")
-  if (!hasColumn("schedules", "git_auto_commit")) addColumn("schedules", "git_auto_commit INTEGER NOT NULL DEFAULT 1")
+  if (!hasColumn("schedules", "git_auto_commit")) addColumn("schedules", "git_auto_commit INTEGER NOT NULL DEFAULT 0")
   if (!hasColumn("schedules", "git_auto_push")) addColumn("schedules", "git_auto_push INTEGER NOT NULL DEFAULT 0")
   if (!hasColumn("schedules", "git_auto_merge")) addColumn("schedules", "git_auto_merge INTEGER NOT NULL DEFAULT 0")
   if (!hasColumn("schedules", "git_run_start_mode")) {
