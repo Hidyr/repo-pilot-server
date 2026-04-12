@@ -1,9 +1,9 @@
 import { Hono } from "hono"
 import { eq } from "drizzle-orm"
-import { existsSync, realpathSync } from "node:fs"
+import { existsSync, realpathSync, statSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
 import { dirname } from "node:path"
-import { basename, join } from "node:path"
+import { basename, extname, join, resolve, sep } from "node:path"
 import { apiError } from "../http"
 import { db, now, uuid, sqlite } from "../db/client"
 import { projects, schedules as schedulesTable } from "../db/schema"
@@ -32,6 +32,81 @@ function normalizeLocalPath(p: string): string {
 
 function normalizeGitUrl(u: string): string {
   return u.trim().replace(/\/+$/, "").replace(/\.git$/, "").toLowerCase()
+}
+
+const readmeAssetMime: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".ico": "image/x-icon",
+  ".bmp": "image/bmp",
+  ".avif": "image/avif",
+  ".md": "text/markdown; charset=utf-8",
+  ".txt": "text/plain; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".html": "text/html; charset=utf-8",
+  ".htm": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".cjs": "text/javascript; charset=utf-8",
+  ".ts": "text/typescript; charset=utf-8",
+  ".tsx": "text/typescript; charset=utf-8",
+  ".xml": "application/xml; charset=utf-8",
+  ".yml": "text/yaml; charset=utf-8",
+  ".yaml": "text/yaml; charset=utf-8",
+}
+
+/**
+ * Resolve `relPath` (decoded, forward-slash form) to an absolute file path under `projectRoot`,
+ * or return null if it escapes the project directory.
+ */
+function safePathUnderProject(projectRoot: string, relPath: string): string | null {
+  const trimmed = relPath.trim().replace(/^\/+/, "")
+  if (!trimmed) return null
+  const parts = trimmed.split("/").filter(Boolean)
+  if (parts.some((p) => p === "." || p === "..")) return null
+  let rootReal: string
+  try {
+    rootReal = realpathSync(projectRoot)
+  } catch {
+    return null
+  }
+  const candidate = resolve(rootReal, ...parts)
+  const prefix = rootReal.endsWith(sep) ? rootReal : rootReal + sep
+  if (candidate !== rootReal && !candidate.startsWith(prefix)) return null
+  return candidate
+}
+
+/** Repo leaf name derived from a remote URL (no .git). */
+function repoLeafFromGitUrl(gitUrl: string): string {
+  return basename(gitUrl.replace(/\/+$/, "").replace(/\.git$/i, ""))
+}
+
+/**
+ * Resolve where `git clone` should put the working tree.
+ * - Existing directory whose name already matches the repo → clone *into* that path.
+ * - Otherwise existing directory → parent folder; clone to `<dir>/<repo>`.
+ * - Non-existent path → treat as the exact target directory name (git creates it).
+ */
+function resolveGitCloneDestination(clonePathInput: string, repoLeaf: string): string {
+  const trimmed = clonePathInput.trim().replace(/\/+$/, "")
+  const normRepo = repoLeaf.replace(/\.git$/i, "")
+  const leaf = basename(trimmed)
+  if (leaf.toLowerCase() === normRepo.toLowerCase()) {
+    return trimmed
+  }
+  try {
+    if (statSync(trimmed).isDirectory()) {
+      return join(trimmed, normRepo)
+    }
+  } catch {
+    // Path does not exist (or unreadable): use as explicit clone target.
+  }
+  return trimmed
 }
 
 function stats(projectId: string) {
@@ -123,13 +198,13 @@ projectsRouter.post("/", async (c) => {
       return apiError(c, "REPO_EXISTS", "This Git repository was already added.", 409)
     }
 
-    const repoName = basename(body.gitUrl.replace(/\/+$/, "").replace(/\.git$/, ""))
+    const repoName = repoLeafFromGitUrl(body.gitUrl)
     const home = process.env.HOME ?? process.env.USERPROFILE ?? ""
     const configuredBase = ((await getSetting("git_clone_base_dir")) ?? "").trim()
     const defaultBase = configuredBase || (home ? join(home, "projects") : "")
     const desired =
       body.clonePath && body.clonePath.trim()
-        ? body.clonePath.trim()
+        ? resolveGitCloneDestination(body.clonePath.trim(), repoName)
         : defaultBase
           ? join(defaultBase, repoName)
           : ""
@@ -298,6 +373,45 @@ projectsRouter.get("/:id/readme", async (c) => {
   } catch (e) {
     return apiError(c, "INTERNAL", (e as any)?.message ?? "Could not read README.md", 500)
   }
+})
+
+/** Serve a single project file (images, etc.) for README rendering — `path` is repo-relative. */
+projectsRouter.get("/:id/readme-asset", async (c) => {
+  const id = c.req.param("id")
+  const row = await db.select().from(projects).where(eq(projects.id, id)).get()
+  if (!row) return apiError(c, "PROJECT_NOT_FOUND", "Project not found", 404)
+
+  const projectRoot = String((row as any).localPath ?? "")
+  if (!projectRoot) return apiError(c, "VALIDATION_ERROR", "Project has no localPath", 400)
+
+  let rel = ""
+  try {
+    rel = decodeURIComponent(String(c.req.query("path") ?? "").trim())
+  } catch {
+    return apiError(c, "VALIDATION_ERROR", "Invalid path encoding", 400)
+  }
+  if (!rel) return apiError(c, "VALIDATION_ERROR", "path query parameter is required", 400)
+
+  const abs = safePathUnderProject(projectRoot, rel)
+  if (!abs) return apiError(c, "VALIDATION_ERROR", "Invalid path", 400)
+
+  try {
+    if (!statSync(abs).isFile()) {
+      return apiError(c, "NOT_FOUND", "Not a file", 404)
+    }
+  } catch {
+    return apiError(c, "NOT_FOUND", "File not found", 404)
+  }
+
+  const file = Bun.file(abs)
+  const ext = extname(abs).toLowerCase()
+  const type = readmeAssetMime[ext] ?? "application/octet-stream"
+  return new Response(file, {
+    headers: {
+      "Content-Type": type,
+      "Cache-Control": "private, max-age=300",
+    },
+  })
 })
 
 projectsRouter.put("/:id", async (c) => {

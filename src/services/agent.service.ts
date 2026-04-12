@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { db, uuid } from "../db/client"
 import { agents } from "../db/schema"
 import type { Agent, AgentPreset } from "../types"
+import { agentSpawnEnv } from "./agent-cli-env"
 import { BUILTIN_AGENT_ORDER, isAgentPreset, presetSpawnConfig } from "./agent-presets"
 
 export async function getEnabledAgent(): Promise<Agent | null> {
@@ -106,6 +107,7 @@ export async function runAgentStreaming(
   console.log(`Built command for agent ${agent.id}: ${command} ${args.join(" ")}`)
   const proc = Bun.spawn([command, ...args], {
     cwd: workingDir,
+    env: agentSpawnEnv(),
     stdout: "pipe",
     stderr: "pipe",
   })

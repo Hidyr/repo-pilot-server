@@ -28,18 +28,31 @@ const PORT = Number(process.env.PORT ?? 3579)
 
 const app = new Hono()
 
-app.use(
-  "*",
-  cors({
-    origin: [
-      "http://localhost:3000",
-      "http://127.0.0.1:3000",
-      "tauri://localhost",
-      "http://localhost:1420",
-      "http://127.0.0.1:1420",
-    ],
-  })
-)
+/** CORS allow-list: Tauri / WKWebView can send origins not in a fixed list (e.g. after reload). */
+function allowCorsOrigin(origin: string): string | null {
+  if (origin === "null") return "null"
+  const exact = new Set([
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "tauri://localhost",
+    "http://localhost:1420",
+    "http://127.0.0.1:1420",
+    "https://tauri.localhost",
+    "http://tauri.localhost",
+  ])
+  if (exact.has(origin)) return origin
+  try {
+    const u = new URL(origin)
+    if (u.hostname === "127.0.0.1" || u.hostname === "localhost") {
+      return origin
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+app.use("*", cors({ origin: allowCorsOrigin }))
 
 app.route("/api/projects", projectsRouter)
 app.route("/api/features", featuresRouter)

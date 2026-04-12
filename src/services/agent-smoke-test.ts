@@ -1,3 +1,5 @@
+import type { AgentPreset } from "../types"
+import { agentSpawnEnv, resolvedAgentExecutable } from "./agent-cli-env"
 import { isAgentPreset } from "./agent-presets"
 
 const TIMEOUT_MS = 15_000
@@ -59,6 +61,7 @@ async function runAgentOnce(
   let proc: ReturnType<typeof Bun.spawn>
   try {
     proc = Bun.spawn([cmd, ...args], {
+      env: agentSpawnEnv(),
       stdout: "pipe",
       stderr: "pipe",
     })
@@ -109,6 +112,7 @@ async function runAgentOnceStreaming(
   let proc: ReturnType<typeof Bun.spawn>
   try {
     proc = Bun.spawn([cmd, ...args], {
+      env: agentSpawnEnv(),
       stdout: "pipe",
       stderr: "pipe",
     })
@@ -150,26 +154,15 @@ async function runAgentOnceStreaming(
   return { code, timedOut }
 }
 
-function versionArgv(preset: string): { command: string; args: string[] } {
-  // Keep this simple and predictable; the goal is only to prove the binary exists
-  // and can run without requiring interactive trust.
-  switch (preset) {
-    case "cursor":
-      return { command: "cursor-agent", args: ["--version"] }
-    case "claude_code":
-      return { command: "claude", args: ["--version"] }
-    case "codex":
-      return { command: "codex", args: ["--version"] }
-    default:
-      return { command: preset, args: ["--version"] }
-  }
+function versionArgv(preset: AgentPreset): { command: string; args: string[] } {
+  return { command: resolvedAgentExecutable(preset), args: ["--version"] }
 }
 
 export async function runAgentSmokeTest(preset: string): Promise<AgentSmokeResult> {
   if (!isAgentPreset(preset)) {
     return { ok: false, error: `Unknown preset: ${preset}` }
   }
-  const { command, args } = versionArgv(preset)
+  const { command, args } = versionArgv(preset as AgentPreset)
   const { code, output, timedOut } = await runAgentOnce([command, ...args], TIMEOUT_MS)
   if (timedOut) return { ok: false, error: `Timed out after ${TIMEOUT_MS / 1000}s running --version.` }
   if (code === 0) return { ok: true, message: extractVersion(output) || "" }
@@ -183,7 +176,7 @@ export async function runAgentSmokeTestStreaming(
   if (!isAgentPreset(preset)) {
     return { ok: false, error: `Unknown preset: ${preset}` }
   }
-  const { command, args } = versionArgv(preset)
+  const { command, args } = versionArgv(preset as AgentPreset)
   let captured = ""
   await onChunk(`$ ${[command, ...args].join(" ")}\n\n`, "stderr", true)
   const { code, timedOut } = await runAgentOnceStreaming([command, ...args], TIMEOUT_MS, async (t, s) => {

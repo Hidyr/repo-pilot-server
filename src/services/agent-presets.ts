@@ -1,4 +1,5 @@
 import type { AgentPreset } from "../types"
+import { resolvedAgentExecutable } from "./agent-cli-env"
 
 /** Row ids — must match database primary keys for built-in agents. */
 export const BUILTIN_AGENT_IDS = {
@@ -35,17 +36,17 @@ export function presetSpawnConfig(
   switch (preset) {
     case "cursor":
       return {
-        command: "cursor-agent",
+        command: resolvedAgentExecutable("cursor"),
         args: ["--print", "--force", "--trust", ctx.workingDir, ctx.promptFile],
       }
     case "claude_code":
       return {
-        command: "claude",
+        command: resolvedAgentExecutable("claude_code"),
         args: ["-p", ctx.promptFile],
       }
     case "codex":
       return {
-        command: "codex",
+        command: resolvedAgentExecutable("codex"),
         args: ["exec", "--full-auto", ctx.promptFile],
       }
   }
